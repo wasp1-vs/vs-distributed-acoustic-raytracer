@@ -469,4 +469,101 @@ walls: &Vec<Wall>
     %    This demonstrated that standard file I/O operations entirely eclipsed the physics engine's execution time,
     %    necessitating the subsequent implementation of a \texttt{BufWriter} to stage the serialization in RAM.
     %\end{itemize}
+
+    \newpage
+\section{Binaurale 3D-Audio-Ausgabe mit HRTF}
+\label{sec:hrtf_3d_audio}
+
+Nach der Umstellung der Physik-Engine auf einen dreidimensionalen Raum wurde auch die Audioausgabe räumlich erweitert.
+Ziel ist es, aus einer trockenen Audiodatei ein Echo bzw. einen Nachhall zu erzeugen, dessen Reflexionen über Kopfhörer räumlich wahrgenommen werden können.
+Dafür reicht eine klassische Impulsantwort aus Delay- und Amplitudenwerten nicht mehr aus.
+Zusätzlich muss bekannt sein, aus welcher Richtung eine Reflexion am Mikrofon eintrifft.
+
+Die Rust-Simulation speichert deshalb pro Mikrofontreffer drei Werte:
+\texttt{delay}, \texttt{pressure} und \texttt{direction}.
+\texttt{delay} beschreibt die Ankunftszeit, \texttt{pressure} die verbleibende Energie und \texttt{direction} die räumliche Einfallsrichtung.
+Damit wird aus der bisherigen eindimensionalen Impulsantwort eine gerichtete Impulsantwort.
+
+\subsection{Richtungsinformationen aus der Simulation}
+\label{subsec:direction_information}
+
+Die Richtungsinformationen werden direkt beim Mikrofontreffer berechnet.
+Sobald ein Ray-Segment nahe genug am Mikrofon vorbeifliegt, wird ein normalisierter Vektor vom Mikrofon zum Trefferpunkt gespeichert.
+Dieser Richtungsvektor enthält keine Distanz mehr, sondern nur die Information, aus welcher Richtung der Schallanteil kommt.
+
+\begin{lstlisting}[language=Rust]
+let direction = (end_point - config.mic_position).normalize();
+
+ray_hits.push((
+    total_distance_at_hit / 343.0,
+    current_pressure,
+    direction
+));
+\end{lstlisting}
+
+Da die Simulation parallel arbeitet, wird diese zusätzliche Information zusammen mit den Delay- und Pressure-Werten gesammelt.
+Auch der JSON-Export wurde entsprechend erweitert, sodass \texttt{ir\_output.json} neben \texttt{delays\_seconds} und \texttt{pressures} auch eine Liste \texttt{directions} enthält.
+Diese gerichtete Impulsantwort bildet die Grundlage für die HRTF-Verarbeitung in Python.
+
+\subsection{HRTF als Grundlage räumlicher Wahrnehmung}
+\label{subsec:hrtf_foundation}
+
+Für die binaurale Wiedergabe wird eine HRTF-Datenbank verwendet.
+HRTF steht für \textit{Head-Related Transfer Function} und beschreibt, wie ein eintreffender Schall durch Kopf, Ohrmuscheln und Oberkörper abhängig von seiner Richtung verändert wird.
+Diese Filtereffekte sind entscheidend dafür, dass Menschen Schallquellen räumlich lokalisieren können.
+
+In der Implementierung wird eine SOFA-Datei aus der CIPIC-Datenbank verwendet, beispielsweise \texttt{subject\_003.sofa}.
+SOFA ist ein standardisiertes Format für räumliche Audiodaten.
+Die Klasse \texttt{HRTFDatabase} lädt daraus die Messpositionen und die dazugehörigen HRIRs.
+HRIR steht für \textit{Head-Related Impulse Response} und bezeichnet die Impulsantworten für linkes und rechtes Ohr zu einer bestimmten Einfallsrichtung.
+
+Für jede simulierte Reflexion wird aus dem Richtungsvektor zunächst ein Winkelpaar aus Azimut und Elevation berechnet.
+Der Azimut beschreibt die horizontale Richtung, also vorne, links, rechts oder hinten.
+Die Elevation beschreibt die vertikale Richtung, also oben oder unten.
+Anhand dieser Winkel wird anschließend der nächstgelegene Messpunkt in der HRTF-Datenbank ausgewählt.
+
+\begin{lstlisting}
+az, el = vector_to_az_el(direction)
+hrir_l, hrir_r = hrtf_db.get_closest_hrir(az, el)
+\end{lstlisting}
+
+Diese Version verwendet dafür eine einfache Nearest-Neighbor-Auswahl.
+Das bedeutet, dass nicht zwischen Messpunkten interpoliert wird, sondern immer die nächstgelegene vorhandene HRIR genutzt wird.
+Dadurch bleibt die Implementierung robust und leicht nachvollziehbar.
+
+\subsection{Binaurale Faltung}
+\label{subsec:binaural_convolution_hrtf}
+
+Die HRTF-basierte Faltung erfolgt in der Klasse \texttt{BinauralConvolver}.
+Für jeden Ray-Hit wird anhand seiner Einfallsrichtung eine passende HRIR für das linke und rechte Ohr gewählt.
+Der Delay-Wert bestimmt, an welcher Stelle diese HRIR in die binaurale Impulsantwort eingesetzt wird.
+Der Pressure-Wert skaliert die Stärke der Reflexion.
+
+Dadurch wird jede Reflexion nicht nur zeitlich verzögert und abgeschwächt, sondern zusätzlich durch einen richtungsabhängigen Ohrfilter geprägt.
+Aus allen Ray-Hits entsteht eine zweikanalige binaurale Impulsantwort.
+Diese wird anschließend mit dem trockenen Eingangssignal gefaltet:
+
+\begin{lstlisting}
+out_l = signal.oaconvolve(dry_audio, binaural_ir[:, 0], mode="full")
+out_r = signal.oaconvolve(dry_audio, binaural_ir[:, 1], mode="full")
+wet = np.stack([out_l, out_r], axis=1)
+\end{lstlisting}
+
+Das Ergebnis ist eine Stereo-WAV-Datei.
+Über Kopfhörer kann diese Datei als räumliches Echo bzw. räumlicher Nachhall wahrgenommen werden.
+
+\subsection{Integration und Ergebnis}
+\label{subsec:hrtf_integration_result}
+
+Die Integration erfolgt in der bestehenden Python-Pipeline.
+Nach dem Start der Rust-Simulation wird die erzeugte Datei \texttt{ir\_output.json} geladen.
+Enthält sie Richtungsdaten, wird die HRTF-basierte binaurale Faltung verwendet.
+Falls keine Richtungsdaten vorhanden sind, bleibt die ursprüngliche Faltung als Fallback erhalten.
+
+Der entscheidende Unterschied zu einfachem Stereo-Panning besteht darin, dass HRTF nicht nur Lautstärkeunterschiede zwischen linkem und rechtem Kanal erzeugt.
+Stattdessen werden frequenzabhängige Filtereffekte berücksichtigt, die beim realen Hören durch Kopf und Ohrmuscheln entstehen.
+Dadurch können Reflexionen über Kopfhörer räumlich differenzierter wahrgenommen werden.
+
+Die Erweiterung macht aus der klassischen Impulsantwort eine gerichtete binaurale Impulsantwort.
+Damit wird das simulierte Echo nicht nur mit korrekter Verzögerung und Lautstärke, sondern auch räumlich wiedergegeben.
 \end{document}
