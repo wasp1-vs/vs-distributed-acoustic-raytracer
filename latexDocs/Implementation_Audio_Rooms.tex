@@ -67,16 +67,17 @@ Die Implementierung erfolgt in Python und integriert sich nahtlos in die bestehe
 
 \section{Architektur-\"Ubersicht}
 
-Das System folgt einer 4-stufigen Pipeline:
+Das System folgt einer erweiterten Pipeline mit automatischer Raumgeometrie-Integration:
 
 \begin{enumerate}
-    \item[\textbf{[1/4]}] Rust Physics Engine: Simuliert Schallstrahlen, erzeugt Impulsantwort (IR)
+    \item[\textbf{[0/4]}] OBJ-Import: \texttt{room.obj} $\to$ \texttt{room\_geometry.json} mit Material-Absorption
+    \item[\textbf{[1/4]}] Rust Physics Engine: L\"adt Raumgeometrie, simuliert Schallstrahlen, erzeugt IR
     \item[\textbf{[2/4]}] Audio-Einlesung: L\"adt trockene WAV-Datei
-    \item[\textbf{[3/4]}] DSP-Convolution: Wendet IR auf Audio an
+    \item[\textbf{[3/4]}] DSP-Convolution: Wendet IR mit frequenzabh\"angiger Material-D\"ampfung an
     \item[\textbf{[4/4]}] Audio-Export: Normalisiert und speichert Ergebnis
 \end{enumerate}
 
-Die Raumdaten werden parallel in den Tracer geladen, um realistische 3D-Geometrien zu unterst\"utzen.
+Das Wandmaterial wird in \texttt{input\_config.json} konfiguriert und durchgehend durch alle Stufen propagiert: von der Geometrie-Absorption im Rust-Tracer bis zur oktavbandbasierten Frequenzformung in der Convolution.
 
 % ========================================
 \chapter{Audio I/O Handling}
@@ -171,12 +172,15 @@ def write_wav(wav_path: str, audio_data, sample_rate: int) -> None:
 # main.py Schritt [2/4]: Audio laden
 dry_audio, sample_rate = read_wav(input_wav_path)
 
-# Schritt [3/4]: Convolution
-wet_audio = convolve(dry_audio, sample_rate, ir_data)
+# Schritt [3/4]: Convolution mit Material-Absorption
+conv_material = ir_data.get("metadata", {}).get("wall_material")
+wet_audio = convolve(dry_audio, sample_rate, ir_data, material=conv_material)
 
 # Schritt [4/4]: Normalisieren und exportieren
 write_wav(output_wav_path, wet_audio, sample_rate)
 \end{lstlisting}
+
+Der \texttt{wall\_material}-Wert wird automatisch aus \texttt{ir\_output.json} gelesen, das der Rust-Tracer nach der Simulation schreibt. Damit nutzen Tracer und Convolution stets dasselbe Material.
 
 % ========================================
 \chapter{3D-Raumdaten: OBJ-Parser}
@@ -210,6 +214,8 @@ x_3 & y_3 & z_3
 
 \section{Implementierung: \texttt{obj\_parser.py}}
 
+\subsection{OBJ-Loader}
+
 \begin{lstlisting}
 def load_obj_to_triangles(file_path: str) -> list:
     vertices = []
@@ -234,18 +240,49 @@ def load_obj_to_triangles(file_path: str) -> list:
     return triangles
 \end{lstlisting}
 
-\section{Export ins JSON-Format}
+\subsection{Material-basierter Export: \texttt{export\_room\_geometry()}}
+
+Die neue Exportfunktion verbindet OBJ-Geometrie mit der Materialdatenbank
+(\texttt{materials.json}) und schreibt \texttt{room\_geometry.json} f\"ur den Rust-Tracer.
+Jedes Dreieck erh\"alt die mittlere Absorptionskonstante des gew\"ahlten Materials:
 
 \begin{lstlisting}
-import json
-triangles = load_obj_to_triangles("room.obj")
-data = {
-    "triangles": triangles,
-    "triangle_count": len(triangles)
-}
-with open("room_geometry.json", "w") as f:
-    json.dump(data, f, indent=2)
+_MATERIALS_JSON = Path(__file__).resolve().parent.parent / "rust_service" / "materials.json"
+
+def _mean_absorption(material: str) -> float:
+    """Mittlere Absorption aus materials.json fuer das gewaehlte Material."""
+    data = json.loads(_MATERIALS_JSON.read_text())
+    alphas = data["materials"][material]["absorption"]
+    return sum(alphas) / len(alphas)
+
+def export_room_geometry(obj_path: str, material: str, out_path: str) -> None:
+    triangles_raw = load_obj_to_triangles(obj_path)
+    absorption = _mean_absorption(material)
+    triangles = [
+        {"v0": t[0], "v1": t[1], "v2": t[2], "absorption": absorption}
+        for t in triangles_raw
+    ]
+    out = {"triangles": triangles, "triangle_count": len(triangles)}
+    Path(out_path).write_text(json.dumps(out, indent=2))
 \end{lstlisting}
+
+\subsection{Ausgabeformat: \texttt{room\_geometry.json}}
+
+Der Rust-Tracer liest Dreiecke inkl.\ Material-Absorption aus dieser Datei:
+
+\begin{lstlisting}[language=JavaScript]
+{
+  "triangles": [
+    {"v0": [0.0, 0.0, 0.0], "v1": [12.0, 0.0, 0.0],
+     "v2": [12.0, 12.0, 0.0], "absorption": 0.033}
+  ],
+  "triangle_count": 12
+}
+\end{lstlisting}
+
+Die \texttt{absorption}-Werte entsprechen dem arithmetischen Mittel aller 8 Oktavb\"ander
+aus \texttt{materials.json}. Die frequenzabh\"angige Verarbeitung findet ausschlie\ss{}lich
+in der Python-Convolution statt.
 
 % ========================================
 \chapter{Integration und Testing}
@@ -253,14 +290,65 @@ with open("room_geometry.json", "w") as f:
 
 \section{End-to-End-Pipeline}
 
+Die Pipeline verl\"auft nun in 5 Schritten. Schritt~0 ist vollautomatisch:
+\texttt{room.obj} wird erkannt, mit dem konfigurierten Material in
+\texttt{room\_geometry.json} umgewandelt und dem Rust-Tracer bereitgestellt.
+
 \begin{lstlisting}
-print("--- Starting Acoustic Reverb Pipeline ---")
+# Schritt 0: OBJ -> room_geometry.json (automatisch wenn room.obj vorhanden)
+if Path("room.obj").exists():
+    export_room_geometry("room.obj", wall_material,
+                         "../rust_service/room_geometry.json")
+
+# Schritt 1: Rust Physics Engine
 ir_data = run_rust_and_load_json(rust_binary_path, json_path)
+
+# Schritt 2: Audio laden
 dry_audio, sample_rate = read_wav(input_wav_path)
-wet_audio = convolve(dry_audio, sample_rate, ir_data)
+
+# Schritt 3: Convolution mit Material-Absorption
+conv_material = ir_data.get("metadata", {}).get("wall_material")
+wet_audio = convolve(dry_audio, sample_rate, ir_data, material=conv_material)
+
+# Schritt 4: Normalisieren und exportieren
 write_wav(output_wav_path, wet_audio, sample_rate)
-print("--- Pipeline Complete! ---")
 \end{lstlisting}
+
+\section{Material-Konfiguration}
+
+Das Wandmaterial wird in \texttt{rust\_service/input\_config.json} festgelegt:
+
+\begin{lstlisting}[language=JavaScript]
+{
+  "wall_material": "concrete",
+  "max_bounces": 100,
+  "rays_to_cast": 1000
+}
+\end{lstlisting}
+
+Vom Rust-Tracer wird \texttt{wall\_material} in \texttt{ir\_output.json} exportiert
+und von der Python-Pipeline automatisch f\"ur die Convolution \"ubernommen.
+Vegerf\"ugbare Materialien (aus \texttt{materials.json}):
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|c|}
+        \hline
+        \textbf{Material} & \textbf{Beschreibung} & \textbf{Mittl. Absorption} \\
+        \hline
+        \texttt{concrete} & Beton (stark reflektierend) & 0.033 \\
+        \hline
+        \texttt{drywall}  & Trockenbau (m\"a\ss{}ig) & 0.150 \\
+        \hline
+        \texttt{glass}    & Glas (stark reflektierend) & 0.026 \\
+        \hline
+        \texttt{carpet}   & Teppich (stark absorbierend) & 0.425 \\
+        \hline
+        \texttt{foam}     & Schaum (sehr stark absorbierend) & 0.650 \\
+        \hline
+    \end{tabular}
+    \caption{Verf\"ugbare Materialien in \texttt{materials.json}}
+\end{table}
 
 \section{Abh\"angigkeiten}
 
@@ -272,9 +360,11 @@ print("--- Pipeline Complete! ---")
         \hline
         \texttt{wav\_handler.py} & soundfile, numpy & Any \\
         \hline
-        \texttt{obj\_parser.py} & pathlib & Built-in \\
+        \texttt{obj\_parser.py} & pathlib, json & Built-in \\
         \hline
         \texttt{convolution.py} & scipy, numpy & Any \\
+        \hline
+        \texttt{materials.json} & --- (Datenbasis) & --- \\
         \hline
     \end{tabular}
 \end{table}
@@ -286,6 +376,27 @@ print("--- Pipeline Complete! ---")
 \section{Convolution im Frequenzraum}
 
 $$Y(f) = X(f) \cdot H(f), \quad y[n] = \mathcal{F}^{-1}\{Y(f)\}$$
+
+\section{Oktavband-basierte Material-D\"ampfung}
+
+Der Rust-Tracer liefert pro Schallstrahl nur einen skalaren Druck. Die
+frequenzabh\"angige D\"ampfung des Wandmaterials wird in der Convolution
+nachtr\"aglich im Frequenzbereich modelliert.
+
+Ein Tap zur Zeit $t$ hat circa $n(t) = t \,/\, t_{\text{mfp}}$ Reflexionen
+erfahren. Pro Oktavband $b$ mit Absorptionskoeffizient $\alpha_b$ verbleibt
+der Anteil:
+
+$$\text{Gain}_b(t) = (1 - \alpha_b)^{n(t)} = (1 - \alpha_b)^{\,t / t_{\text{mfp}}}$$
+
+Die Impulsantwort wird bandweise gefiltert und mit dem zeitvarianten Gain
+gewichtet:
+
+$$h_{\text{mat}}[n] = \sum_{b} \underbrace{(\text{Bandpass}_b * h)[n]}_{\text{gefilterte IR}} \cdot (1-\alpha_b)^{\,n/(f_s \cdot t_{\text{mfp}})}$$
+
+Hohe B\"ander mit gro\ss{}em $\alpha_b$ (z.B.\ Teppich: $\alpha_{8\,\text{kHz}} = 0.70$)
+klingen schnell aus --- der Raum klingt dunkler und trockener.
+Bei Beton ($\alpha_b \approx 0.02\text{--}0.05$) bleibt der Klang lange hell.
 
 \section{Ray-Tracer Intersection (M\"oller-Trumbore)}
 
@@ -314,7 +425,7 @@ $$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec
     \end{tabular}
 \end{table}
 
-\section{Raumdaten: OBJ-Parser}
+\section{Raumdaten: OBJ-Parser \& Material-Integration}
 
 \begin{table}[H]
     \centering
@@ -324,7 +435,13 @@ $$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec
         \hline
         Parser liest .obj & \checkmark & \texttt{len(triangles) > 0} \\
         \hline
-        JSON-Export & \checkmark & G\"ultige JSON, Geometrie-Metadaten \\
+        JSON-Export mit Absorption & \checkmark & \texttt{absorption}-Feld pro Dreieck \\
+        \hline
+        Rust l\"adt OBJ-Geometrie & \checkmark & \texttt{room\_geometry.json} erkannt \\
+        \hline
+        Material durchgereicht & \checkmark & \texttt{wall\_material} in \texttt{ir\_output.json} \\
+        \hline
+        Frequenzabh\"ang. Convolution & \checkmark & \texttt{apply\_material\_absorption()} \\
         \hline
     \end{tabular}
 \end{table}
@@ -339,14 +456,18 @@ $$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec
     \item \textbf{Audio I/O}: Robust WAV-Lesen/Schreiben mit soundfile
     \item \textbf{Clipping-Pr\"avention}: Peak-Normalisierung vor Export
     \item \textbf{OBJ-Parser}: Liest Vertices/Faces, konvertiert in Dreiecke
-    \item \textbf{Pipeline-Integration}: Nahtlose Verkettung aller Komponenten
+    \item \textbf{Material-Integration}: \texttt{export\_room\_geometry()} verbindet OBJ mit \texttt{materials.json}
+    \item \textbf{Rust-OBJ-Pipeline}: Rust l\"adt \texttt{room\_geometry.json} automatisch
+    \item \textbf{Material-Durchleitung}: \texttt{wall\_material} von Config bis Convolution
+    \item \textbf{Frequenzabh\"angige D\"ampfung}: Oktavband-EQ via \texttt{apply\_material\_absorption()}
+    \item \textbf{Pipeline-Integration}: Vollautomatisch ab Schritt~0 (OBJ-Erkennung)
 \end{enumerate}
 
 \section{M\"ogliche Erweiterungen}
 
 \begin{enumerate}
     \item \textbf{Multi-Channel Audio}: Stereo/5.1 Surround Support
-    \item \textbf{Material-Attribute}: Pro-Dreieck Material-IDs aus OBJ
+    \item \textbf{Per-Dreieck-Materialien}: Verschiedene Materialien pro Wandfl\"ache aus \texttt{.mtl}-Datei
     \item \textbf{Adaptive Normalisierung}: Loudness-basierte Pegel (LUFS) statt Peak
     \item \textbf{Geometrie-Optimierungen}: BVH-Tree f\"ur schnelle OBJ-Intersects
 \end{enumerate}
