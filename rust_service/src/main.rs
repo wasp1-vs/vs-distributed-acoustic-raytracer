@@ -9,8 +9,10 @@ use geometry::Triangle;
 
 use glam::Vec3;
 
+use serde::Deserialize;
 use simulation::SimulationConfig;
 use std::fs;
+use std::path::Path;
 use std::time::Instant;
 
 
@@ -54,6 +56,34 @@ fn add_rect_as_two_triangles(
 }
 
 
+// Aus room_geometry.json ladbare Dreieck-Daten (von obj_parser.py generiert).
+#[derive(Deserialize)]
+struct TriangleData {
+    v0: Vec3,
+    v1: Vec3,
+    v2: Vec3,
+    absorption: f32,
+}
+
+#[derive(Deserialize)]
+struct RoomGeometryFile {
+    triangles: Vec<TriangleData>,
+}
+
+// Mittlere Absorptionswerte pro Material (Mittel über 8 Oktavbänder aus materials.json).
+// Genutzt für den eingebauten Fallback-Würfelraum.
+fn material_absorption(material: Option<&str>) -> f32 {
+    match material {
+        Some("concrete") => 0.033,
+        Some("carpet")   => 0.425,
+        Some("drywall")  => 0.150,
+        Some("glass")    => 0.026,
+        Some("foam")     => 0.650,
+        _                => 0.200,
+    }
+}
+
+
 fn main() {
     // CLI-Argumente einlesen.
     let cli = Cli::parse();
@@ -70,86 +100,40 @@ fn main() {
 
 
 
-    // Koordinatensystem:
-    // x = links/rechts
-    // y = vorne/hinten
-    // z = Höhe
-    //
-    // Der Raum ist hier ein Würfel/Quader:
-    // Breite: 10m
-    // Tiefe: 10m
-    // Höhe:  3m
-    let width = 10.0;
-    let depth = 10.0;
-    let height = 10.0;
-
-    // Absorption der Flächen.
-    // 0.1 bedeutet: 10% Energieverlust pro Reflexion.
-    let absorption = 0.2;
-
-    // Liste aller Dreiecke im Raum.
-    let mut room: Vec<Triangle> = Vec::new();
-
-
-    // Boden
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(width, 0.0, 0.0),
-        Vec3::new(width, depth, 0.0),
-        Vec3::new(0.0, depth, 0.0),
-        absorption,
-    );
-
-    // Decke
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(0.0, 0.0, height),
-        Vec3::new(width, 0.0, height),
-        Vec3::new(width, depth, height),
-        Vec3::new(0.0, depth, height),
-        absorption,
-    );
-
-    // Wand vorne
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(width, 0.0, 0.0),
-        Vec3::new(width, 0.0, height),
-        Vec3::new(0.0, 0.0, height),
-        absorption,
-    );
-
-    // Wand hinten
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(0.0, depth, 0.0),
-        Vec3::new(width, depth, 0.0),
-        Vec3::new(width, depth, height),
-        Vec3::new(0.0, depth, height),
-        absorption,
-    );
-
-    // Wand links
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(0.0, depth, 0.0),
-        Vec3::new(0.0, depth, height),
-        Vec3::new(0.0, 0.0, height),
-        absorption,
-    );
-
-    // Wand rechts
-    add_rect_as_two_triangles(
-        &mut room,
-        Vec3::new(width, 0.0, 0.0),
-        Vec3::new(width, depth, 0.0),
-        Vec3::new(width, depth, height),
-        Vec3::new(width, 0.0, height),
-        absorption,
-    );
+    // Raum-Geometrie laden: room_geometry.json (OBJ-Import via Python) wenn vorhanden,
+    // sonst eingebauter 10x10x10m Würfel mit Material-basierter Absorption.
+    let room: Vec<Triangle> = if Path::new("room_geometry.json").exists() {
+        println!("Loading room geometry from room_geometry.json ...");
+        let text = fs::read_to_string("room_geometry.json")
+            .expect("Could not read room_geometry.json");
+        let geom: RoomGeometryFile = serde_json::from_str(&text)
+            .expect("Invalid room_geometry.json – run obj_parser.py to regenerate");
+        println!("Loaded {} triangles from OBJ file.", geom.triangles.len());
+        geom.triangles
+            .into_iter()
+            .map(|t| Triangle { v0: t.v0, v1: t.v1, v2: t.v2, absorption: t.absorption })
+            .collect()
+    } else {
+        println!("No room_geometry.json – using built-in 10x10x10m box.");
+        let absorption = material_absorption(test_config.wall_material.as_deref());
+        let width = 10.0_f32;
+        let depth = 10.0_f32;
+        let height = 10.0_f32;
+        let mut fallback: Vec<Triangle> = Vec::new();
+        // Boden
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(0.0, 0.0, 0.0), Vec3::new(width, 0.0, 0.0), Vec3::new(width, depth, 0.0), Vec3::new(0.0, depth, 0.0), absorption);
+        // Decke
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(0.0, 0.0, height), Vec3::new(width, 0.0, height), Vec3::new(width, depth, height), Vec3::new(0.0, depth, height), absorption);
+        // Wand vorne
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(0.0, 0.0, 0.0), Vec3::new(width, 0.0, 0.0), Vec3::new(width, 0.0, height), Vec3::new(0.0, 0.0, height), absorption);
+        // Wand hinten
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(0.0, depth, 0.0), Vec3::new(width, depth, 0.0), Vec3::new(width, depth, height), Vec3::new(0.0, depth, height), absorption);
+        // Wand links
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, depth, 0.0), Vec3::new(0.0, depth, height), Vec3::new(0.0, 0.0, height), absorption);
+        // Wand rechts
+        add_rect_as_two_triangles(&mut fallback, Vec3::new(width, 0.0, 0.0), Vec3::new(width, depth, 0.0), Vec3::new(width, depth, height), Vec3::new(width, 0.0, height), absorption);
+        fallback
+    };
 
 
     println!("Starting 3D parallel simulation");

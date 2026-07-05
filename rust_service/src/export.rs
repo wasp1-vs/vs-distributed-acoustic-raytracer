@@ -20,6 +20,7 @@ struct OutputMetadata {
     rays_cast: u32,
     rays_received: u32,
     room_name: String,
+    wall_material: String,
 }
 
 
@@ -65,6 +66,7 @@ pub fn export_results(
             rays_cast: config.rays_to_cast,
             rays_received: delays.len() as u32,
             room_name: String::from("MVP_Test_Room_3D"),
+            wall_material: config.wall_material.clone().unwrap_or_else(|| String::from("concrete")),
         },
         hits: OutputHits {
             delays_seconds: delays,

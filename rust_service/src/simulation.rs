@@ -30,6 +30,7 @@ pub struct SimulationConfig {
     pub mic_position: Vec3,
     pub rays_to_cast: u32,
     pub speaker_position: Vec3,
+    pub wall_material: Option<String>,
 }
 
 
