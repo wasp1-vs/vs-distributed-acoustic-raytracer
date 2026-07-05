@@ -1,0 +1,366 @@
+\documentclass[11pt,a4paper,twoside]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+% Code-Styling
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    breaklines=true,
+    showstringspaces=false,
+    frame=single,
+    backgroundcolor=\color{white},
+    numberstyle=\tiny,
+    numbers=left,
+    stepnumber=1,
+    columns=flexible
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Distributed Acoustic Ray Tracer}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{Ticket 3 \& Raumdaten-Integration}
+
+\title{\Huge\textbf{Implementationsdokumentation}\\[0.3cm]
+       \Large Audio I/O \& 3D-Raumdaten}
+\author{Kais}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% ========================================
+\chapter{Einf\"uhrung}
+% ========================================
+
+Dieses Dokument beschreibt die Implementierung zweier kritischer Komponenten des Distributed Acoustic Ray Tracers:
+
+\begin{enumerate}
+    \item \textbf{Audio I/O (Ticket 3):} Einlesen trockener WAV-Dateien und Export des verarbeiteten, halligen Audio-Signals mit Clipping-Pr\"avention
+    \item \textbf{Raumdaten (OBJ-Parser):} Laden von 3D-Modellen aus \texttt{.obj}-Dateien und Konvertierung in das interne JSON-Format
+\end{enumerate}
+
+Die Implementierung erfolgt in Python und integriert sich nahtlos in die bestehende Pipeline, die Rust-basierte Physik-Engine, DSP-Convolution und Distributed-Computing-Frameworks verbindet.
+
+\section{Architektur-\"Ubersicht}
+
+Das System folgt einer 4-stufigen Pipeline:
+
+\begin{enumerate}
+    \item[\textbf{[1/4]}] Rust Physics Engine: Simuliert Schallstrahlen, erzeugt Impulsantwort (IR)
+    \item[\textbf{[2/4]}] Audio-Einlesung: L\"adt trockene WAV-Datei
+    \item[\textbf{[3/4]}] DSP-Convolution: Wendet IR auf Audio an
+    \item[\textbf{[4/4]}] Audio-Export: Normalisiert und speichert Ergebnis
+\end{enumerate}
+
+Die Raumdaten werden parallel in den Tracer geladen, um realistische 3D-Geometrien zu unterst\"utzen.
+
+% ========================================
+\chapter{Audio I/O Handling}
+% ========================================
+
+\section{Anforderungen (Akzeptanzkriterien)}
+
+\begin{enumerate}
+    \item Sauberes Einlesen der \texttt{unprocessed.wav} ohne Qualit\"atsverlust
+    \item Export der finalen WAV-Datei ohne Artefakte
+    \item Normalisierung, damit geschichtetes Audio beim Export nicht clippt
+\end{enumerate}
+
+\section{Theoretischer Hintergrund}
+
+\subsection{WAV-Format und Audio-Digitalisierung}
+
+Das WAV-Format speichert Audiodaten als zeitdiskrete Samples mit konstanter Abtastfrequenz $f_s$ (typisch 44.1 kHz oder 48 kHz):
+
+$$x[n] = \int_{(n-0.5)/f_s}^{(n+0.5)/f_s} x_{\text{analog}}(t) \, dt$$
+
+Jedes Sample liegt im Bereich $[-1.0, 1.0]$ (bei normalisierten 16/32-Bit PCM).
+
+\subsection{Clipping und Normalisierung}
+
+Wenn w\"ahrend der Convolution (Faltung) die Amplitude $|y[n]|$ \"uber 1.0 steigt, tritt \textbf{Clipping} auf:
+
+$$y_{\text{clipped}}[n] = \begin{cases}
+    1.0 & \text{wenn } y[n] > 1.0 \\
+    y[n] & \text{wenn } |y[n]| \leq 1.0 \\
+    -1.0 & \text{wenn } y[n] < -1.0
+\end{cases}$$
+
+Um dies zu vermeiden, normalisieren wir:
+
+$$y_{\text{norm}}[n] = \frac{y[n]}{A_{\max}} \quad \text{wobei} \quad A_{\max} = \max_n |y[n]|$$
+
+\section{Implementierung: \texttt{wav\_handler.py}}
+
+\subsection{WAV-Einlesung}
+
+\begin{lstlisting}
+import numpy as np
+import soundfile as sf
+
+def read_wav(wav_path: str) -> tuple:
+    """
+    Reads a WAV file and returns the audio data as a NumPy array
+    along with the corresponding sample rate.
+    """
+    audio_data, sample_rate = sf.read(wav_path)
+    return audio_data, sample_rate
+\end{lstlisting}
+
+\textbf{Funktionsweise:}
+
+\begin{itemize}
+    \item Die \texttt{soundfile}-Bibliothek liest WAV-Dateien robust
+    \item \texttt{audio\_data} ist ein NumPy-Array der Form \texttt{(samples,)} oder \texttt{(samples, channels)}
+    \item \texttt{sample\_rate} ist die Abtastfrequenz in Hz
+\end{itemize}
+
+\subsection{WAV-Export mit Normalisierung}
+
+\begin{lstlisting}
+def write_wav(wav_path: str, audio_data, sample_rate: int) -> None:
+    """
+    Normalizes the audio data to prevent clipping and exports it to a WAV file.
+    """
+    max_amplitude = np.max(np.abs(audio_data))
+    if max_amplitude > 1.0:
+        audio_data = audio_data / max_amplitude
+    sf.write(wav_path, audio_data, sample_rate)
+\end{lstlisting}
+
+\textbf{Algorithmus:}
+
+\begin{algorithm}
+    \caption{Normalisierter WAV-Export}
+    \begin{algorithmic}
+        \STATE $A_{\max} \gets \max_n |y[n]|$
+        \IF{$A_{\max} > 1.0$}
+            \STATE $y[n] \gets y[n] / A_{\max}$ f\"ur alle $n$
+        \ENDIF
+        \STATE Schreibe normalisierte Samples in WAV-Datei
+    \end{algorithmic}
+\end{algorithm}
+
+\subsection{Integration in die Pipeline}
+
+\begin{lstlisting}
+# main.py Schritt [2/4]: Audio laden
+dry_audio, sample_rate = read_wav(input_wav_path)
+
+# Schritt [3/4]: Convolution
+wet_audio = convolve(dry_audio, sample_rate, ir_data)
+
+# Schritt [4/4]: Normalisieren und exportieren
+write_wav(output_wav_path, wet_audio, sample_rate)
+\end{lstlisting}
+
+% ========================================
+\chapter{3D-Raumdaten: OBJ-Parser}
+% ========================================
+
+\section{Theoretischer Hintergrund}
+
+\subsection{OBJ-Format}
+
+Das Wavefront \texttt{.obj}-Format ist ein textbasiertes 3D-Modellformat:
+
+\begin{lstlisting}[language={}]
+# Vertices (Ecken)
+v  1.0  2.0 -1.5    # Vertex 1
+v  2.0  2.0 -1.5    # Vertex 2
+v  1.0  3.0 -1.5    # Vertex 3
+
+# Faces (Dreiecke)
+f  1/1/1  2/2/1  3/3/1
+\end{lstlisting}
+
+\textbf{Indexierung:} OBJ nutzt 1-basierte Indizes, Python 0-basierte -- Umrechnung n\"otig.
+
+\subsection{Dreiecks-Repr\"asentation}
+
+$$\text{Triangle} = \begin{bmatrix}
+x_1 & y_1 & z_1 \\
+x_2 & y_2 & z_2 \\
+x_3 & y_3 & z_3
+\end{bmatrix}$$
+
+\section{Implementierung: \texttt{obj\_parser.py}}
+
+\begin{lstlisting}
+def load_obj_to_triangles(file_path: str) -> list:
+    vertices = []
+    triangles = []
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"The 3D file '{file_path}' was not found.")
+    with path.open('r') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('v '):
+                parts = line.split()
+                x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+                vertices.append([x, y, z])
+            elif line.startswith('f '):
+                parts = line.split()
+                v1_idx = int(parts[1].split('/')[0]) - 1
+                v2_idx = int(parts[2].split('/')[0]) - 1
+                v3_idx = int(parts[3].split('/')[0]) - 1
+                triangle = [vertices[v1_idx], vertices[v2_idx], vertices[v3_idx]]
+                triangles.append(triangle)
+    return triangles
+\end{lstlisting}
+
+\section{Export ins JSON-Format}
+
+\begin{lstlisting}
+import json
+triangles = load_obj_to_triangles("room.obj")
+data = {
+    "triangles": triangles,
+    "triangle_count": len(triangles)
+}
+with open("room_geometry.json", "w") as f:
+    json.dump(data, f, indent=2)
+\end{lstlisting}
+
+% ========================================
+\chapter{Integration und Testing}
+% ========================================
+
+\section{End-to-End-Pipeline}
+
+\begin{lstlisting}
+print("--- Starting Acoustic Reverb Pipeline ---")
+ir_data = run_rust_and_load_json(rust_binary_path, json_path)
+dry_audio, sample_rate = read_wav(input_wav_path)
+wet_audio = convolve(dry_audio, sample_rate, ir_data)
+write_wav(output_wav_path, wet_audio, sample_rate)
+print("--- Pipeline Complete! ---")
+\end{lstlisting}
+
+\section{Abh\"angigkeiten}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|c|}
+        \hline
+        \textbf{Modul} & \textbf{Bibliotheken} & \textbf{Version} \\
+        \hline
+        \texttt{wav\_handler.py} & soundfile, numpy & Any \\
+        \hline
+        \texttt{obj\_parser.py} & pathlib & Built-in \\
+        \hline
+        \texttt{convolution.py} & scipy, numpy & Any \\
+        \hline
+    \end{tabular}
+\end{table}
+
+% ========================================
+\chapter{Mathematische Modelle}
+% ========================================
+
+\section{Convolution im Frequenzraum}
+
+$$Y(f) = X(f) \cdot H(f), \quad y[n] = \mathcal{F}^{-1}\{Y(f)\}$$
+
+\section{Ray-Tracer Intersection (M\"oller-Trumbore)}
+
+Gegeben Strahl $\vec{r}(t) = \vec{o} + t\vec{d}$ und Dreieck $(\vec{a}, \vec{b}, \vec{c})$:
+
+$$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec{o})}{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot \vec{d}}, \quad \tau = \frac{t}{343 \text{ m/s}}, \quad n = \lfloor \tau \cdot f_s \rfloor$$
+
+% ========================================
+\chapter{Akzeptanzkriterien und Validierung}
+% ========================================
+
+\section{Ticket 3: Audio I/O}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|p{4.5cm}|p{2cm}|p{5cm}|}
+        \hline
+        \textbf{Kriterium} & \textbf{Erf\"ullt?} & \textbf{Test} \\
+        \hline
+        Sauberes Einlesen .wav & \checkmark & \texttt{len(audio\_data) > 0} \\
+        \hline
+        Export ohne Qualit\"atsverlust & \checkmark & H\"ortest, Spektrum-Analyse \\
+        \hline
+        Normalisierung gegen Clipping & \checkmark & \texttt{max(abs(audio)) <= 1.0} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\section{Raumdaten: OBJ-Parser}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|p{4.5cm}|p{2cm}|p{5cm}|}
+        \hline
+        \textbf{Kriterium} & \textbf{Erf\"ullt?} & \textbf{Test} \\
+        \hline
+        Parser liest .obj & \checkmark & \texttt{len(triangles) > 0} \\
+        \hline
+        JSON-Export & \checkmark & G\"ultige JSON, Geometrie-Metadaten \\
+        \hline
+    \end{tabular}
+\end{table}
+
+% ========================================
+\chapter{Zusammenfassung und Ausblick}
+% ========================================
+
+\section{Implementierte Features}
+
+\begin{enumerate}
+    \item \textbf{Audio I/O}: Robust WAV-Lesen/Schreiben mit soundfile
+    \item \textbf{Clipping-Pr\"avention}: Peak-Normalisierung vor Export
+    \item \textbf{OBJ-Parser}: Liest Vertices/Faces, konvertiert in Dreiecke
+    \item \textbf{Pipeline-Integration}: Nahtlose Verkettung aller Komponenten
+\end{enumerate}
+
+\section{M\"ogliche Erweiterungen}
+
+\begin{enumerate}
+    \item \textbf{Multi-Channel Audio}: Stereo/5.1 Surround Support
+    \item \textbf{Material-Attribute}: Pro-Dreieck Material-IDs aus OBJ
+    \item \textbf{Adaptive Normalisierung}: Loudness-basierte Pegel (LUFS) statt Peak
+    \item \textbf{Geometrie-Optimierungen}: BVH-Tree f\"ur schnelle OBJ-Intersects
+\end{enumerate}
+
+\appendix
+\chapter{Code-Referenz}
+
+\section{wav\_handler.py}
+Code-Referenz: \texttt{python\_service/wav\_handler.py}
+
+\section{obj\_parser.py}
+Code-Referenz: \texttt{python\_service/obj\_parser.py}
+
+\section{main.py}
+Code-Referenz: \texttt{python\_service/main.py}
+
+\end{document}
