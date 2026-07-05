@@ -1,0 +1,213 @@
+% =====================================================================
+% Kapitel 5 - Digitale Signalverarbeitung und Orchestrierung (Python)
+% Autor: Cem Acar
+%
+% EINBINDEN ins Hauptdokument:
+%   1. Dieses File nach latexDocs/ legen.
+%   2. Im Master (Dokumentation.tex) an der richtigen Stelle einfuegen:
+%        \input{Kapitel5_DSP_Cem}
+%   3. Der Master braucht nur diese Pakete (Dokumentation.tex hat beide schon):
+%        \usepackage{amsmath}
+%        \usepackage{listings}
+%      Kein xcolor/babel noetig: Umlaute laufen unter UTF-8, deutsche
+%      Anfuehrungszeichen sind literal „..." gesetzt.
+%
+% STANDALONE-VORSCHAU (zum alleine Kompilieren einfach drumherum setzen):
+%   \documentclass{article}\usepackage{amsmath}\usepackage{listings}
+%   \begin{document}
+%   \input{Kapitel5_DSP_Cem}
+%   \end{document}
+% =====================================================================
+
+% Listing-Stil fuer dieses Kapitel (nur listings-Kern, keine Farben noetig)
+\lstdefinestyle{cemdsp}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    showstringspaces=false,
+    breaklines=true,
+    numbers=left,
+    numberstyle=\tiny,
+    frame=single,
+    tabsize=4
+}
+
+%======================================================================
+\section{Digitale Signalverarbeitung und Orchestrierung (Python)}
+\label{sec:python-dsp}
+
+Die Rust-Engine berechnet die Physik der Schallausbreitung, der Python-Dienst
+übernimmt die Signalverarbeitung und die Orchestrierung der Pipeline. Warum die
+Physik in Rust und die Signalverarbeitung in Python mit NumPy und SciPy liegt,
+ist in Kapitel~3 begründet. Die signaltheoretischen Grundlagen, also
+Impulsantwort, Faltungsintegral und schnelle Faltung über die FFT, behandelt
+Abschnitt~2.3. Dieses Kapitel zeigt, wie diese Grundlagen im Code umgesetzt sind,
+und folgt dabei dem Datenfluss durch die Pipeline.
+
+\subsection{Pipeline-Management durch \texttt{main.py}}
+\label{subsec:pipeline}
+
+\texttt{main.py} führt die vier Verarbeitungsschritte nacheinander aus. Tritt in
+einem Schritt ein Fehler auf, bricht die Pipeline sofort mit einer Meldung ab,
+statt mit ungültigen Zwischendaten weiterzurechnen (fail-fast).
+
+\begin{enumerate}
+    \item \textbf{Physik-Engine starten:} \texttt{run\_rust\_and\_load\_json} ruft
+    die vorkompilierte Rust-Binary als Subprozess auf und lädt deren Ausgabe
+    \texttt{ir\_output.json} als Python-Dictionary (\texttt{ir\_data}).
+    \item \textbf{Trockenaudio laden:} \texttt{read\_wav} liest die
+    Eingangsdatei und liefert Audiodaten samt Abtastrate.
+    \item \textbf{Faltung:} \texttt{convolve} wendet die aus \texttt{ir\_data}
+    erzeugte Impulsantwort auf das Trockensignal an.
+    \item \textbf{Export:} \texttt{write\_wav} normalisiert das Ergebnis bei
+    Bedarf und schreibt die fertige Ausgabedatei.
+\end{enumerate}
+
+Der Binary-Name wird plattformabhängig gewählt: unter Windows mit der Endung
+\texttt{.exe}, unter macOS und Linux ohne. Stimmt die Abtastrate des Trockenaudios
+nicht mit der Rate der Engine überein, gibt \texttt{main.py} eine Warnung aus,
+weil der Hall sonst verstimmt klingen kann.
+
+\subsection{Die Prozessbrücke zwischen Rust und Python}
+\label{subsec:rust-runner}
+
+Rust und Python sind nicht über eine Sprachbindung wie PyO3 gekoppelt, sondern
+lose über einen Subprozess-Aufruf und eine JSON-Datei verbunden. Die Funktion
+\texttt{run\_rust\_and\_load\_json} kapselt diese Brücke. Sie prüft zunächst, ob
+die Binary existiert, und bestimmt das Arbeitsverzeichnis anhand der
+\texttt{input\_config.json}. Eine alte Ausgabedatei wird vorher gelöscht, damit
+kein veraltetes Ergebnis eingelesen wird. Nach dem Lauf wertet die Funktion den
+Rückgabecode aus; schlägt Rust fehl, landen \texttt{stdout} und \texttt{stderr} in
+der Fehlermeldung und erleichtern die Diagnose. Der Vorteil der losen Kopplung
+liegt im verteilten Betrieb: Beide Dienste lassen sich getrennt kompilieren,
+testen und auf mehrere Cluster-Knoten verteilen.
+
+\subsection{Signalverarbeitung mit SciPy}
+\label{subsec:scipy}
+
+Das Modul \texttt{convolution.py} bildet den Kern des Python-Dienstes. Es wandelt
+die rohen Verzögerungs- und Druckdaten in eine abtastgenaue Impulsantwort um und
+faltet damit das Trockensignal.
+
+\subsubsection{Diskretisierung der Impulsantwort}
+\label{subsubsec:build-ir}
+
+Die Rust-Engine liefert eine endliche Menge diskreter Strahl-Treffer, jeweils
+bestehend aus einer Ankunftsverzögerung $\tau_j$ (in Sekunden) und einem skalaren
+Restdruck $p_j$. Die Funktion \texttt{build\_impulse\_response} quantisiert jeden
+Treffer auf den nächstgelegenen Abtastindex $i_j = \operatorname{round}(\tau_j
+\cdot f_s)$ und akkumuliert gleichzeitige Treffer zur diskreten Impulsantwort:
+\[
+    h[i] \;=\; \sum_{j} p_j \cdot \bigl[\,i_j = i\,\bigr].
+\]
+Die Akkumulation erfolgt mit \texttt{numpy.add.at}. Anders als die einfache
+indizierte Zuweisung, die bei doppelten Indizes nur den letzten Wert behält,
+summiert \texttt{add.at} gleichzeitige Treffer korrekt auf. Vor der Berechnung
+prüft die Funktion die Eingaben an der Systemgrenze: übereinstimmende
+Array-Formen, Eindimensionalität, nicht-negative Verzögerungen und eine positive
+Abtastrate.
+
+\begin{lstlisting}[style=cemdsp, caption={Diskretisierung der Ray-Hits zur Impulsantwort.}]
+indices = np.round(delays * sample_rate).astype(np.int64)
+ir_length = int(indices.max()) + 1
+ir = np.zeros(ir_length, dtype=np.float64)
+np.add.at(ir, indices, pressures)   # akkumuliert gleichzeitige Treffer
+return ir
+\end{lstlisting}
+
+\subsubsection{Faltung mit \texttt{oaconvolve}}
+\label{subsubsec:oaconvolve}
+
+Die eigentliche Faltung nutzt \texttt{scipy.signal.oaconvolve}, die
+Overlap-Add-basierte FFT-Faltung aus Abschnitt~2.3. Der Modus \texttt{"full"}
+liefert das vollständige Ergebnis der Länge $N + M - 1$ und bewahrt damit den
+kompletten Nachhall. Mehrkanaliges (etwa Stereo-)Audio wird kanalweise gefaltet
+und danach wieder zusammengesetzt:
+
+\begin{lstlisting}[style=cemdsp, caption={Mono- und Mehrkanal-Faltung.}]
+if dry_audio.ndim == 1:
+    wet = signal.oaconvolve(dry_audio, ir, mode="full")
+elif dry_audio.ndim == 2:
+    channels = [
+        signal.oaconvolve(dry_audio[:, c], ir, mode="full")
+        for c in range(dry_audio.shape[1])
+    ]
+    wet = np.stack(channels, axis=1)
+return wet.astype(np.float32)
+\end{lstlisting}
+
+Vor der Faltung prüft \texttt{convolve} das Schema von \texttt{ir\_data} und
+vergleicht die Abtastraten von Audio und Impulsantwort. Das Ergebnis gibt die
+Funktion roh und unnormalisiert zurück. Die Lautstärke regelt erst der Export
+(Abschnitt~\ref{subsec:rendering}); so bleibt die Faltung frei von Pegelfragen.
+
+\subsubsection{Frequenzabhängige Materialdämpfung}
+\label{subsubsec:material}
+
+Reale Materialien dämpfen Schall frequenzabhängig. Ein Teppich schluckt hohe
+Frequenzen viel stärker als tiefe, Beton reflektiert dagegen fast breitbandig.
+Die Rust-Engine reduziert die Absorption aber schon auf einen einzigen skalaren
+Restdruck $p_j$ pro Treffer, sodass die spektrale Information an dieser
+Systemgrenze verloren geht. Damit der Nachhall trotzdem frequenzabhängig wird,
+ergänzt \texttt{convolution.py} ein Absorptionsmodell im Frequenzbereich.
+
+Grundlage sind die Oktavband-Absorptionskoeffizienten $\alpha_b$ aus der Datei
+\texttt{materials.json}, die auch die Rust-Engine speist. Physik und
+Signalverarbeitung greifen damit auf dieselbe Datenbasis zu (single source of
+truth). Jedes Material ist über sechs Oktavbänder mit den Mittenfrequenzen
+$125,\,250,\,500,\,1000,\,2000$ und $4000$~Hz beschrieben; ein hoher Koeffizient
+bedeutet starke Dämpfung im jeweiligen Band.
+
+Das Modell beruht auf einer einfachen Überlegung: Ein Tap, der zum Zeitpunkt $t$
+eintrifft, hat näherungsweise $n(t) = t / \tau_{\mathrm{mfp}}$ Reflexionen hinter
+sich, wobei $\tau_{\mathrm{mfp}}$ die mittlere Zeit zwischen zwei Reflexionen
+angibt (die mittlere freie Weglänge in Zeiteinheiten). Nach $n$ Reflexionen
+verbleibt in jedem Oktavband $b$ der Energieanteil
+\[
+    g_b(t) \;=\; \bigl(1 - \alpha_b\bigr)^{\,n(t)} \;=\; \bigl(1 - \alpha_b\bigr)^{\,t / \tau_{\mathrm{mfp}}}.
+\]
+Bänder mit hohem $\alpha_b$, etwa die Höhen bei Teppich, klingen dadurch deutlich
+schneller ab als solche mit niedrigem $\alpha_b$. Der Nachhall wird über die Zeit
+zunehmend dunkler.
+
+Im Code setzt eine Oktavband-Filterbank dieses Modell um. Die Impulsantwort wird
+über Butterworth-Bandpässe (nullphasig via \texttt{sosfiltfilt}) in ihre sechs
+Bänder zerlegt, jedes Band mit der zeitabhängigen Hüllkurve $g_b(t)$ gewichtet und
+die Bänder anschließend wieder aufsummiert.
+
+\begin{lstlisting}[style=cemdsp, caption={Frequenzabhaengige Material-Daempfung der Impulsantwort.}]
+centers, materials = _load_materials(str(_MATERIALS_JSON))
+nyquist = sample_rate / 2.0
+reflections = (np.arange(ir.size) / sample_rate) / mean_free_path_s
+
+shaped = np.zeros_like(ir)
+for (low, high), alpha in zip(_octave_band_edges(centers), materials[material]):
+    band = _bandpass(ir, low, high, nyquist)      # ein Oktavband isolieren
+    gain = np.power(max(1e-6, 1.0 - alpha), reflections)
+    shaped += band * gain                          # zeitabhaengig daempfen
+return shaped
+\end{lstlisting}
+
+\paragraph{Verifikation.} Ein reproduzierbarer Selbsttest prüft das Modell. Er
+dämpft dieselbe dichte Impulsantwort einmal mit \texttt{carpet} und einmal mit
+\texttt{concrete} und misst jeweils den Energieanteil oberhalb von $2$~kHz. Bei
+Teppich bleiben davon nur $0{,}39$ übrig, bei Beton $0{,}71$; der Teppich schluckt
+die Höhen also deutlich stärker. Kippt diese Reihenfolge, schlägt der Test fehl.
+
+\paragraph{Grenzen des Modells.} Das Verfahren modelliert ein globales
+Raummaterial, nicht die tatsächliche Materialfolge eines einzelnen Strahlpfads.
+Eine Trennung nach Oberfläche, also die Aussage „dieser Tap stammt von Teppich,
+jener von Beton", ist im Python-Dienst nicht möglich, solange die Rust-Engine nur
+einen skalaren Druck pro Treffer liefert. Dafür müsste die Engine schon bandweise
+Drücke ($p_{j,b}$ statt $p_j$) exportieren. Kapitel~7 führt das als mögliche
+Erweiterung.
+
+\subsection{Audio-Rendering und Export}
+\label{subsec:rendering}
+
+Das Ein- und Auslesen der Audiodateien sowie die Normalisierung gegen Clipping
+übernimmt \texttt{wav\_handler.py}; die Details stehen in der Teildokumentation zum
+Audio-I/O. Für den DSP-Teil zählt nur der Vertrag zwischen den Stufen.
+\texttt{convolve} liefert ein rohes, womöglich übersteuertes Signal;
+\texttt{write\_wav} misst dessen maximale Amplitude und normalisiert erst, wenn
+sie den Bereich $[-1{,}0,\,1{,}0]$ verlässt. So bleibt Clipping aus, und die
+Faltung muss sich nie um Pegel kümmern.
