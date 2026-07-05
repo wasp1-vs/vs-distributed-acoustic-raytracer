@@ -4,5 +4,6 @@
   "mic_radius": 3.0,
   "mic_position": [8.0, 7.0, 6.0],
   "rays_to_cast": 1,
-  "speaker_position": [2.0, 3.0, 1.5]
+  "speaker_position": [2.0, 3.0, 1.5],
+  "wall_material": "concrete"
 }

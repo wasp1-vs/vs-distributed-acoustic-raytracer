@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+_MATERIALS_JSON = Path(__file__).resolve().parent.parent / "rust_service" / "materials.json"
+
+
 def load_obj_to_triangles(file_path: str) -> list:
     """
     Reads an .obj file and converts it into a list of 3D triangles.
@@ -42,6 +45,38 @@ def load_obj_to_triangles(file_path: str) -> list:
                 triangles.append(triangle)
                 
     return triangles
+
+
+def _mean_absorption(material: str) -> float:
+    """Liest materials.json und gibt den mittleren Absorptionswert zurück."""
+    data = json.loads(_MATERIALS_JSON.read_text())
+    available = list(data["materials"].keys())
+    if material not in data["materials"]:
+        raise ValueError(f"Unknown material '{material}'. Available: {available}")
+    alphas = data["materials"][material]["absorption"]
+    return sum(alphas) / len(alphas)
+
+
+def export_room_geometry(obj_path: str, material: str, out_path: str) -> None:
+    """Liest ein .obj-File und schreibt room_geometry.json für den Rust-Tracer.
+
+    Jedes Dreieck bekommt die mittlere Absorptionskonstante des Wandmaterials
+    (aus materials.json). Der Rust-Tracer nutzt diesen Wert für den
+    Energieverlust pro Reflexion; die frequenzabhängige Faltung übernimmt
+    Python (convolution.py mit apply_material_absorption).
+    """
+    triangles_raw = load_obj_to_triangles(obj_path)
+    absorption = _mean_absorption(material)
+    triangles = [
+        {"v0": t[0], "v1": t[1], "v2": t[2], "absorption": absorption}
+        for t in triangles_raw
+    ]
+    out = {"triangles": triangles, "triangle_count": len(triangles)}
+    out_file = Path(out_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(json.dumps(out, indent=2))
+    print(f"Exported {len(triangles)} triangles -> {out_path} (material={material}, absorption={absorption:.3f})")
+
 
 if __name__ == "__main__":
     # Quick test when running the file directly.
