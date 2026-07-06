@@ -1,0 +1,444 @@
+% =====================================================================
+% Kapitel: Verteilte Ausfuehrung auf dem Rechencluster
+% Autor: Mier
+%
+% EINBINDEN: \input{Kapitel_Cluster_Mier} im Master.
+% Benoetigte Pakete: amsmath, listings, graphicx, booktabs.
+% Fuer saubere Optik im Master: fontenc, babel[ngerman], microtype.
+% Abbildungen: latexDocs/figures/cluster_arch.png, mc_convergence.png
+%
+% STANDALONE-VORSCHAU:
+%   \documentclass[12pt]{article}
+%   \usepackage[utf8]{inputenc}\usepackage[T1]{fontenc}
+%   \usepackage[ngerman]{babel}\usepackage{microtype}
+%   \usepackage{amsmath}\usepackage{listings}
+%   \usepackage{graphicx}\usepackage{booktabs}
+%   \begin{document}
+%   \input{Kapitel_Cluster_Mier}
+%   \end{document}
+% =====================================================================
+
+\lstdefinestyle{clusterlst}{
+    basicstyle=\ttfamily\small,
+    showstringspaces=false,
+    breaklines=true,
+    numbers=left,
+    numberstyle=\tiny,
+    frame=single,
+    tabsize=2
+}
+
+%======================================================================
+\section{Verteilte Ausführung auf dem Rechencluster}
+\label{sec:cluster}
+
+\subsection{Einordnung und Aufgabenstellung}
+\label{subsec:cluster-einordnung}
+
+Die Strahlverfolgung ist der teuerste Schritt der gesamten Pipeline. Für eine
+brauchbare Impulsantwort müssen Hunderttausende bis Millionen einzelner
+Schallstrahlen durch die Raumgeometrie verfolgt werden, und jeder dieser Strahlen
+verlangt mehrere Schnitt- und Reflexionsberechnungen. Der entscheidende Vorteil
+dabei: Kein Strahl hängt vom Ergebnis eines anderen ab. Das Problem ist damit
+\emph{embarrassingly parallel} und lässt sich ohne Kommunikation zwischen den
+Teilrechnungen auf beliebig viele Rechner verteilen.
+
+Dieses Kapitel dokumentiert die Verteilungsschicht des Systems. Sie startet die
+Rust-Simulation gleichzeitig auf allen acht Knoten des Labor-Clusters, wartet auf
+deren Abschluss, sammelt die Teilergebnisse ein und fügt sie zu einer einzigen,
+statistisch dichteren Impulsantwort zusammen. Aus Sicht der übrigen Pipeline
+ändert sich dabei nichts: Am Ende steht wieder eine Datei im gewohnten Schema,
+die die Signalverarbeitung unverändert weiterverarbeiten kann.
+
+Zur Abgrenzung von den Nachbarkapiteln gehören zwei Punkte. Erstens ist die
+\emph{prozessinterne} Nebenläufigkeit der Rust-Engine, also die Verteilung auf
+die Kerne eines einzelnen Rechners mittels \texttt{rayon}, an anderer Stelle
+beschrieben und bleibt hier außen vor. Sie parallelisiert innerhalb eines
+Prozesses; dieses Kapitel parallelisiert über Prozess- und Rechnergrenzen hinweg.
+Zweitens geht es nicht um den einzelnen Subprozess-Aufruf aus der Python-Pipeline,
+sondern um die Ebene darüber: die gleichzeitige Ausführung auf mehreren physischen
+Knoten und die anschließende Aggregation ihrer Ergebnisse.
+
+\subsection{Theoretischer Hintergrund}
+\label{subsec:cluster-theorie}
+
+\subsubsection{Monte-Carlo-Strahlverfolgung}
+\label{subsubsec:mc}
+
+Die Engine schätzt die Impulsantwort eines Raumes stochastisch. Sie verschickt
+zufällig gerichtete Strahlen von der Schallquelle, verfolgt ihre Reflexionen und
+registriert, wann und mit welchem Restdruck sie den Empfänger erreichen. Jeder
+einzelne Strahl ist eine Zufallsstichprobe; erst die Summe vieler Strahlen ergibt
+ein aussagekräftiges Bild der Raumakustik. Solche Monte-Carlo-Verfahren haben eine
+charakteristische Eigenschaft: Ihr Schätzfehler sinkt mit der Wurzel der
+Stichprobengröße. Verdoppelt man die Zahl der Strahlen, halbiert sich der Fehler
+also nicht, sondern sinkt nur um den Faktor $\sqrt{2}$. Genau diese langsame
+Konvergenz macht große Strahlzahlen nötig und motiviert die Verteilung auf mehrere
+Rechner.
+
+\subsubsection{Zwei Wege der Verteilung}
+\label{subsubsec:strategien}
+
+Ein Monte-Carlo-Verfahren lässt sich auf zwei grundsätzlich verschiedene Arten
+verteilen. Tabelle~\ref{tab:strategien} stellt sie gegenüber.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Zwei Strategien zur Verteilung der Strahlverfolgung.}
+    \label{tab:strategien}
+    \begin{tabular}{p{3.2cm} p{5.2cm} p{4.2cm}}
+        \toprule
+        & \textbf{Work-Partitioning} & \textbf{Replikat-Parallelismus} \\
+        \midrule
+        Prinzip & Gesamtzahl der Strahlen wird in disjunkte Anteile zerlegt & Jeder Knoten rechnet denselben Auftrag mit eigenem Zufallsstrom \\
+        Koordination & Zuteilung der Anteile nötig & keine, jeder Knoten ist autark \\
+        Zufallszahlen & ein globaler Strom, aufgeteilt & unabhängige Ströme pro Knoten \\
+        Robustheit & Ausfall trifft einen festen Anteil & Ausfall kostet nur Stichprobengröße \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Das umgesetzte System verwendet den zweiten Weg. Alle acht Knoten starten die
+Simulation mit derselben Konfigurationsdatei \texttt{input\_config.json} und
+werfen dennoch jeweils andere Strahlen, weil jeder Prozess seinen eigenen
+Zufallsstrom besitzt. Der Ansatz ist bewusst schlicht gewählt: Er braucht keine
+zentrale Zuteilung und keinen Austausch zwischen den Knoten, sondern nur, dass am
+Ende alle Ergebnisse eingesammelt werden.
+
+\subsubsection{Unabhängigkeit der Zufallsströme}
+\label{subsubsec:rng}
+
+Die Korrektheit des Replikat-Ansatzes steht und fällt mit einer Bedingung: Die
+Zufallszahlen auf den Knoten müssen unabhängig sein. Würde jeder Knoten dieselbe
+Folge zufälliger Richtungen erzeugen, so lieferten alle acht exakt dasselbe
+Ergebnis, und das Zusammenführen brächte keinen Erkenntnisgewinn, sondern nur
+achtfach dieselben Strahlen. Die Rust-Engine schließt das aus, indem sie ihren
+Zufallsstrom pro Thread bzw. Prozess frisch aus der Systementropie zieht:
+
+\begin{lstlisting}[style=clusterlst, language=Rust, caption={Initialisierung des Zufallsstroms pro Prozess (\texttt{simulation.rs}).}]
+let mut rng = rand::rng();                       // Omnidirectional, random rays
+let random_angle: f32 = rng.random_range(0.0..(2.0 * PI));
+let direction = Vec2::new(random_angle.cos(), random_angle.sin());
+\end{lstlisting}
+
+Weil jeder der acht Prozesse auf seinem Knoten einen anderen Startzustand erhält,
+erzeugt jeder eine andere Stichprobe. Acht Knoten mit je einer Million Strahlen
+liefern damit acht Millionen \emph{unabhängige} Stichproben derselben Raumakustik.
+
+\subsubsection{Statistische Konvergenz}
+\label{subsubsec:konvergenz}
+
+Statistisch verhält sich der verteilte Lauf wie eine einzige, achtfach größere
+Simulation. Für einen Monte-Carlo-Schätzer aus $N$ unabhängigen Teilstichproben
+gleicher Größe sinkt die Standardabweichung des Mittelwerts mit
+\[
+    \sigma_N \;=\; \frac{\sigma_1}{\sqrt{N}} .
+\]
+Acht Knoten reduzieren die Streuung der geschätzten Impulsantwort demnach um den
+Faktor $\sqrt{8} \approx 2{,}83$ gegenüber einem einzelnen Knoten.
+Abbildung~\ref{fig:mc-convergence} bestätigt dieses Verhalten in einem numerischen
+Experiment: Aufgetragen ist der mittlere quadratische Fehler der geschätzten
+Impulsantwort über der Knotenzahl. Die Messpunkte folgen sauber der
+$1/\sqrt{N}$-Referenzkurve; von einem auf acht Knoten sinkt der Fehler um den
+Faktor $2{,}78$, praktisch exakt der theoretisch erwartete Wert.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/mc_convergence}
+    \caption{Mittlerer quadratischer Fehler der geschätzten Impulsantwort über der
+    Knotenzahl $N$ (je $5\cdot10^4$ Strahlen, doppelt logarithmisch). Die
+    Messpunkte folgen der $1/\sqrt{N}$-Referenz; acht Knoten senken den Fehler um
+    den Faktor $2{,}78 \approx \sqrt{8}$.}
+    \label{fig:mc-convergence}
+\end{figure}
+
+Bemerkenswert ist die Kehrseite dieser Kurve: Um den Fehler zu halbieren, braucht
+es die vierfache Knotenzahl. Der Nutzen zusätzlicher Knoten nimmt also ab, was bei
+der Wahl der Clustergröße zu berücksichtigen ist. Für die hier angestrebte
+Genauigkeit sind acht Knoten ein sinnvoller Kompromiss zwischen Aufwand und
+Qualität.
+
+\subsection{Architektur des Clusters}
+\label{subsec:cluster-arch}
+
+Das System folgt einem \emph{Manager-Worker}-Muster
+(Abbildung~\ref{fig:cluster-arch}). Ein Manager-Knoten koordiniert den Ablauf,
+acht Worker-Knoten führen die eigentliche Simulation aus. Der Manager selbst
+rechnet nicht mit, sondern startet die Worker, wartet auf sie und führt am Ende
+die Ergebnisse zusammen.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.82\textwidth]{figures/cluster_arch}
+    \caption{Manager-Worker-Architektur. Der Manager startet die acht Knoten
+    parallel per \texttt{ssh}, holt nach Abschluss jede Ergebnisdatei per
+    \texttt{scp} zurück und führt sie mit \texttt{merge\_results.py} zusammen.}
+    \label{fig:cluster-arch}
+\end{figure}
+
+Die Kommunikation läuft vollständig über Standard-Werkzeuge des Betriebssystems.
+\texttt{ssh} startet die Prozesse aus der Ferne, \texttt{scp} überträgt die
+Ergebnisdateien zurück. Ein eigenes Netzwerkprotokoll oder ein
+Message-Passing-Framework kommt nicht zum Einsatz. Für einen Stapelbetrieb, bei
+dem jeder Knoten genau einmal startet, eine Weile rechnet und ein einziges
+Ergebnis zurückliefert, wäre solcher Aufwand nicht gerechtfertigt: Es gibt keine
+laufende Zustandssynchronisation und keinen Nachrichtenaustausch während der
+Rechnung, den ein Framework verwalten müsste.
+
+Damit das funktioniert, müssen drei Voraussetzungen erfüllt sein. Auf jedem Knoten
+liegt dieselbe vorkompilierte Binärdatei \texttt{rust\_service} samt der
+Konfiguration \texttt{input\_config.json}. Der Manager kann sich per SSH ohne
+interaktive Passworteingabe anmelden, was eine Schlüssel-basierte
+Authentifizierung voraussetzt. Und die Knoten sind über feste Adressen im
+Labornetz erreichbar.
+
+\subsection{Ablaufsteuerung: \texttt{run\_cluster.sh}}
+\label{subsec:cluster-run}
+
+Das Skript \texttt{run\_cluster.sh} steuert den verteilten Lauf in drei Phasen:
+paralleles Starten, Warten und Einsammeln.
+
+\begin{lstlisting}[style=clusterlst, language=bash, caption={Verteilter Start und Einsammeln der Ergebnisse (gekürzt).}]
+# Phase 1: alle Knoten gleichzeitig starten (Hintergrundprozesse)
+ssh node1@139.6.65.29 "./rust_service --config-file input_config.json" &
+ssh node2@139.6.65.18 "./rust_service --config-file input_config.json" &
+# ... node3 bis node8 analog ...
+
+wait                       # Phase 2: auf Abschluss ALLER Knoten warten
+
+# Phase 3: Ergebnis jedes Knotens zum Manager kopieren
+scp node1@139.6.65.29:~/ir_output.json ~/ir_node1.json
+scp node2@139.6.65.18:~/ir_output.json ~/ir_node2.json
+# ... node3 bis node8 analog ...
+\end{lstlisting}
+
+Zwei Eigenschaften der Shell nutzt der Ablauf gezielt. Das kaufmännische Und
+(\texttt{\&}) am Zeilenende schickt jeden \texttt{ssh}-Aufruf in den Hintergrund.
+Die acht Simulationen laufen dadurch nahezu gleichzeitig an, statt nacheinander
+abgearbeitet zu werden. Das darauffolgende \texttt{wait} blockiert, bis
+\emph{alle} Hintergrundprozesse beendet sind, und bildet so eine
+Synchronisationsbarriere zwischen der Rechen- und der Einsammel-Phase. Erst wenn
+der letzte Knoten fertig ist, beginnt \texttt{scp}, von jedem Knoten dessen
+\texttt{ir\_output.json} zu holen und unter einem knotenspezifischen Namen auf dem
+Manager abzulegen.
+
+Diese Barriere hat eine wichtige Konsequenz für die Laufzeit: Der Gesamtlauf ist
+so langsam wie der \emph{langsamste} Knoten. Solange die Hardware homogen ist,
+fällt das kaum ins Gewicht; auf ungleichen Knoten würde ein einzelner langsamer
+Rechner den ganzen Lauf ausbremsen, während die übrigen sieben bereits fertig
+warten. Dieses Straggler-Problem ist der zentrale Grund, warum ein statischer
+Replikat-Ansatz mit gleich großen Aufträgen homogene Hardware voraussetzt.
+
+\subsection{Aggregation der Teilergebnisse: \texttt{merge\_results.py}}
+\label{subsec:cluster-merge}
+
+Sobald alle Teilergebnisse auf dem Manager liegen, führt \texttt{merge\_results.py}
+sie zu einer einzigen Impulsantwort zusammen. Jeder Knoten liefert dasselbe
+Ausgabeschema, nämlich Metadaten sowie zwei positionsgleiche Listen aus
+Verzögerungen und Drücken. Die Aggregation besteht deshalb im Kern aus einer
+schlichten Verkettung dieser Listen:
+
+\begin{lstlisting}[style=clusterlst, language=Python, caption={Zusammenführen der Knoten-Ergebnisse, gekürzt (\texttt{merge\_results.py}).}]
+all_delays, all_pressures = [], []
+for f in sorted(glob.glob("/home/manager/ir_node*.json")):
+    with open(f) as file:
+        data = json.load(file)
+        all_delays    += data["hits"]["delays_seconds"]
+        all_pressures += data["hits"]["pressures"]
+
+merged = {
+    "metadata": {"sample_rate": 44100, "rays_cast": 1000000 * 8,
+                 "rays_received": len(all_delays), "room_name": "MVP_Test_Room_1"},
+    "hits": {"delays_seconds": all_delays, "pressures": all_pressures},
+}
+json.dump(merged, open("/home/manager/ir_merged.json", "w"), indent=2)
+\end{lstlisting}
+
+Dass die Verkettung hier die richtige Operation ist, folgt direkt aus dem
+Replikat-Modell. Weil die einzelnen Läufe unabhängige Stichproben desselben Raums
+sind, ist die Vereinigung aller Treffer statistisch identisch mit dem Ergebnis
+eines einzigen Laufs mit acht Millionen Strahlen. Es findet keine Mittelung und
+keine Gewichtung statt, sondern nur ein Aneinanderhängen. Das Feld
+\texttt{rays\_cast} ist im Skript fest auf $8 \cdot 10^{6}$ gesetzt; solange der in
+Abschnitt~\ref{subsec:cluster-grenzen} beschriebene Kopierfehler bei Knoten~6
+besteht, fließen tatsächlich nur sieben Knoten in die Aggregation ein, und dieser
+Metadatenwert überschätzt die reale Strahlzahl. \texttt{rays\_received} zählt
+dagegen die tatsächlich empfangenen Treffer. Die
+zusammengeführte Datei trägt exakt dasselbe Schema wie die Ausgabe eines einzelnen
+Knotens und ist damit ohne weitere Anpassung für die DSP-Pipeline verwendbar.
+
+\subsection{Datenfluss im Überblick}
+\label{subsec:cluster-datenfluss}
+
+Der gesamte verteilte Ablauf lässt sich in fünf Stufen zusammenfassen:
+
+\begin{enumerate}
+    \item Der Manager startet per SSH auf jedem der acht Knoten
+    \texttt{rust\_service} mit identischer Konfiguration, alle parallel.
+    \item Jeder Knoten simuliert unabhängig eine Million Strahlen und schreibt
+    lokal seine \texttt{ir\_output.json}.
+    \item \texttt{wait} synchronisiert: Die Einsammel-Phase beginnt erst, wenn der
+    letzte Knoten fertig ist.
+    \item \texttt{scp} überträgt jede \texttt{ir\_output.json} als
+    \texttt{ir\_node$k$.json} zum Manager.
+    \item \texttt{merge\_results.py} verkettet alle Trefferlisten zu einer
+    \texttt{ir\_merged.json}, die anschließend die DSP-Pipeline verarbeitet.
+\end{enumerate}
+
+\subsection{Leistungsbetrachtung}
+\label{subsec:cluster-leistung}
+
+\subsubsection{Erwarteter Speedup}
+\label{subsubsec:speedup}
+
+Bei der Leistung sind zwei Sichtweisen zu trennen. In der umgesetzten
+Replikat-Betriebsart rechnet jeder Knoten dieselbe Strahlzahl, sodass acht Knoten
+in nahezu derselben Wanduhrzeit die achtfache Stichprobe liefern. Der Gewinn ist
+hier keine kürzere Laufzeit, sondern die höhere Genauigkeit aus
+Abbildung~\ref{fig:mc-convergence}; man spricht vom schwachen Skalieren im Sinne
+von Gustafson, bei dem mit der Rechnerzahl die bearbeitete Problemgröße wächst,
+nicht die Geschwindigkeit einer festen Aufgabe. Will man dagegen eine feste
+Gesamtstrahlzahl in kürzerer Zeit erreichen, so verteilt man diese auf die Knoten,
+sodass jeder nur $8\cdot10^{6}/k$ Strahlen rechnet. Erst in dieser
+Partitionierungs-Betriebsart greift das Gesetz von Amdahl. Bezeichnet $p$ den parallelen
+Anteil der Arbeit, hier die reine Strahlverfolgung, und $1-p$ den seriellen Rest
+aus Prozessstart, Ergebnistransfer und Aggregation, so beträgt der theoretische
+Speedup
+\[
+    S(k) \;=\; \frac{1}{(1-p) + \dfrac{p}{k}} .
+\]
+Da die Strahlverfolgung die Laufzeit klar dominiert, liegt $p$ nahe bei eins, und
+$S(k)$ steigt bis $k=8$ nahezu linear. In der Praxis bleibt der reale Speedup
+darunter, und zwar aus drei Gründen: dem bereits erwähnten Straggler-Effekt (der
+Lauf ist so schnell wie der langsamste Knoten), dem Overhead für den
+SSH-Verbindungsaufbau sowie der Übertragung und Zusammenführung der
+Ergebnisdateien.
+
+\subsubsection{Kommunikations- und I/O-Overhead}
+\label{subsubsec:overhead}
+
+Der Overhead dieses Ansatzes ist klein, aber nicht null. Pro Knoten fallen ein
+SSH-Verbindungsaufbau und eine \texttt{scp}-Übertragung an. Übertragen wird jeweils
+eine JSON-Datei, deren Größe mit der Zahl der empfangenen Treffer wächst; bei
+einer Million geworfener Strahlen liegt sie im Bereich einiger Megabyte. Da diese
+acht Übertragungen erst \emph{nach} der Rechenphase stattfinden und nicht mit ihr
+überlappen, addieren sie sich voll zur Gesamtlaufzeit. Bei deutlich mehr Knoten
+oder größeren Ergebnisdateien würde dieser sequenzielle Einsammel-Schritt zum
+Flaschenhals; eine Überlappung von Rechnung und Transfer oder ein kompakteres
+Ausgabeformat als das gut lesbare, aber platzintensive JSON wären dann die
+naheliegenden Gegenmaßnahmen.
+
+\subsubsection{Messung am Cluster}
+\label{subsubsec:messung}
+
+Die konkreten Laufzeiten hängen von der Laborhardware ab und sind am Cluster zu
+messen. Um einen aussagekräftigen Speedup zu erhalten, wird in der
+Partitionierungs-Betriebsart gemessen: In \texttt{input\_config.json} wird
+\texttt{rays\_to\_cast} auf $8\cdot10^{6}/k$ gesetzt, sodass die Gesamtarbeit über
+alle $k$ Knoten konstant bleibt. Dann wird \texttt{run\_cluster.sh} für
+verschiedene Knotenzahlen mit der Shell-eigenen Zeitmessung ausgeführt:
+
+\begin{lstlisting}[style=clusterlst, language=bash, caption={Messvorschrift für die Laufzeit am Cluster.}]
+time ./run_cluster.sh        # Wanduhrzeit fuer den kompletten verteilten Lauf
+\end{lstlisting}
+
+Tabelle~\ref{tab:speedup} nimmt die Messwerte auf. Als Referenz dient der Lauf mit
+einem einzelnen Knoten; der Speedup ergibt sich als Verhältnis der Wanduhrzeiten.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Wanduhrzeit und Speedup des verteilten Laufs (am Cluster zu messen).}
+    \label{tab:speedup}
+    \begin{tabular}{r r r}
+        \toprule
+        Knoten $k$ & Wanduhrzeit [s] & Speedup $S$ \\
+        \midrule
+        1 & \dots & $1{,}00$ \\
+        2 & \dots & \dots \\
+        4 & \dots & \dots \\
+        8 & \dots & \dots \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Fehlertoleranz und Sicherheit}
+\label{subsec:cluster-fehler}
+
+Zwei Querschnittsthemen verdienen eigene Betrachtung. Beim \textbf{Sicherheits}aspekt
+ist die Schlüssel-basierte SSH-Authentifizierung zentral: Der Manager benötigt
+passwortlosen Zugriff auf jeden Knoten, was über hinterlegte öffentliche Schlüssel
+gelöst ist. Der private Schlüssel des Managers ist damit das entscheidende
+Geheimnis; wer ihn besitzt, kann auf allen Knoten Code ausführen. In einem
+abgeschlossenen Labornetz ist das vertretbar, für einen offeneren Betrieb wäre eine
+engere Rechtevergabe angebracht.
+
+Beim Thema \textbf{Fehlertoleranz} zeigt der aktuelle Stand seine deutlichste
+Schwäche, die im folgenden Abschnitt zusammen mit den übrigen Grenzen diskutiert
+wird. Der Kern des Problems: Ein ausgefallener Knoten wird nicht erkannt, sondern
+schlicht übergangen, sodass die Stichprobengröße unbemerkt sinkt.
+
+\subsection{Grenzen des aktuellen Standes und Ausblick}
+\label{subsec:cluster-grenzen}
+
+Die Verteilungsschicht ist als funktionsfähiger Prototyp umgesetzt. Für einen
+robusten Betrieb bestehen mehrere klar benannte Schwachstellen, die zugleich die
+nächsten Entwicklungsschritte vorgeben.
+
+\begin{itemize}
+    \item \textbf{Fest verdrahtete Konfiguration.} IP-Adressen, Knotennamen, die
+    Knotenzahl und die Ablagepfade stehen direkt im Skript. Ein Umzug auf andere
+    Hardware oder eine andere Knotenzahl erfordert Änderungen am Quelltext. Eine
+    Auslagerung dieser Werte in eine Konfigurationsdatei wäre der naheliegende
+    erste Schritt.
+
+    \item \textbf{Kopierfehler bei Knoten~6.} Im Einsammel-Schritt wird das
+    Ergebnis von Knoten~6 versehentlich nach \texttt{ir\_node5.json} kopiert und
+    überschreibt damit das Ergebnis von Knoten~5. Effektiv fließen so nur sieben
+    statt acht unabhängige Stichproben in die Aggregation ein. Der Fehler ist ein
+    Tippfehler im Zielnamen und leicht zu beheben, führt aber vor Augen, wie
+    fehleranfällig die von Hand ausgeschriebene Knotenliste ist -- ein weiteres
+    Argument für die genannte Auslagerung in eine Schleife über eine
+    Konfigurationsliste.
+
+    \item \textbf{Keine Fehlererkennung.} Fällt ein Knoten aus oder liefert er kein
+    Ergebnis, schlägt der zugehörige \texttt{scp}-Aufruf fehl, der Gesamtlauf setzt
+    sich aber fort und aggregiert stillschweigend über die vorhandenen Dateien. Ein
+    Knotenausfall bleibt damit unbemerkt und verfälscht die Stichprobengröße. Eine
+    Prüfung der Rückgabecodes und eine Warnung bei fehlenden Ergebnissen wären hier
+    angebracht.
+
+    \item \textbf{Manuelle Kopplung an die DSP-Pipeline.} Die Aggregation erzeugt
+    \texttt{ir\_merged.json}, die Python-DSP-Pipeline liest jedoch
+    \texttt{ir\_output.json}. Der Übergang zwischen verteiltem Lauf und Faltung ist
+    derzeit ein manueller Schritt. Eine saubere Integration würde den Cluster-Lauf
+    direkt aus der Orchestrierung heraus anstoßen und die zusammengeführte Datei
+    automatisch weiterreichen.
+
+    \item \textbf{Statische Verteilung.} Der Replikat-Ansatz mit gleich großen
+    Aufträgen ist einfach und robust, setzt aber homogene Hardware voraus und lastet
+    unterschiedlich schnelle Knoten nicht unterschiedlich aus. Ein Modell mit
+    dynamischer Arbeitsverteilung -- ein Manager vergibt Ray-Kontingente, sobald ein
+    Knoten frei wird -- würde heterogene Hardware besser nutzen und die Knotenzahl
+    flexibel machen.
+\end{itemize}
+
+Alle genannten Punkte betreffen Robustheit und Bedienbarkeit, nicht die
+grundsätzliche Korrektheit des Verfahrens. Die verteilte Ausführung liefert eine
+gültige, statistisch dichtere Impulsantwort, und das Manager-Worker-Muster über
+SSH und \texttt{scp} erfüllt seinen Zweck im Laborbetrieb.
+
+\subsection{Zusammenfassung}
+\label{subsec:cluster-zusammenfassung}
+
+Dieses Kapitel hat die verteilte Ausführung der Strahlverfolgung auf dem
+Labor-Cluster beschrieben. Weil die Simulation embarrassingly parallel ist, genügt
+ein Replikat-Ansatz: Alle acht Knoten rechnen denselben Auftrag mit unabhängigen
+Zufallsströmen, was statistisch einer achtfach größeren Simulation entspricht und
+den Schätzfehler der Impulsantwort um rund $\sqrt{8}$ senkt -- ein Verhalten, das
+das numerische Experiment in Abbildung~\ref{fig:mc-convergence} bestätigt. Ein
+Shell-Skript startet die Knoten per SSH parallel, synchronisiert über \texttt{wait}
+und sammelt die Ergebnisse per \texttt{scp} ein; \texttt{merge\_results.py}
+verkettet die Trefferlisten zu einer gemeinsamen Datei im gewohnten Schema. Der
+Prototyp erfüllt seine Aufgabe, weist aber in Konfigurierbarkeit, Fehlererkennung
+und der Anbindung an die DSP-Pipeline die diskutierten Schwächen auf, die den
+Rahmen für die Weiterentwicklung abstecken.
