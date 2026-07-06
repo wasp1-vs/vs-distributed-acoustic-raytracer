@@ -241,7 +241,7 @@ Fehler in den Eingaben dürfen nicht zu stillschweigend falschen Ergebnissen
 führen, sondern müssen sofort und mit aussagekräftiger Meldung scheitern.
 Innerhalb des Python-Dienstes wird dagegen nicht erneut geprüft; die
 Fehlerbehandlung konzentriert sich auf den Übergang zwischen den Diensten.
-Die Funktion weist fünf Fehlerklassen explizit zurück:
+Die Funktion weist sieben Fehlerklassen explizit zurück:
 
 \begin{lstlisting}[style=cemdsp, caption={Eingabevalidierung an der Systemgrenze zur Rust-Engine.}, label={lst:validierung}]
 if delays.shape != pressures.shape:
@@ -254,6 +254,10 @@ if delays.size == 0:
     raise ValueError("no ray hits - cannot build impulse response")
 if (delays < 0).any():
     raise ValueError("negative delay in input")
+if not np.isfinite(delays).all():
+    raise ValueError("delays contain NaN or Inf")
+if not np.isfinite(pressures).all():
+    raise ValueError("pressures contain NaN or Inf")
 if sample_rate <= 0:
     raise ValueError(f"sample_rate must be positive, got {sample_rate}")
 \end{lstlisting}
@@ -269,6 +273,11 @@ Array-Indizes von NumPy kommentarlos als Zugriffe vom Array-Ende her
 interpretiert, der Treffer landete also an einer scheinbar gültigen, aber
 falschen Position. Gerade dieser Fall zeigt den Wert der expliziten Prüfung:
 Ohne sie entstünde kein Absturz, sondern ein subtil falsches Klangergebnis.
+Aus demselben Grund werden Verzögerungen und Drücke zusätzlich auf Endlichkeit
+geprüft: Ein einzelner \texttt{NaN}-Wert aus einer fehlgeschlagenen
+Engine-Berechnung passiert den Vorzeichentest unbemerkt (jeder Vergleich mit
+\texttt{NaN} ergibt \texttt{False}), würde bei der Rundung zu Abtastindizes
+aber ein undefiniertes Ergebnis liefern und die Impulsantwort verfälschen.
 
 Die aufrufende Funktion \texttt{convolve} ergänzt an derselben Systemgrenze
 zwei weitere Prüfungen: Sie validiert das Dictionary-Schema aus
