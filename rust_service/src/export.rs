@@ -1,19 +1,10 @@
-// File wird benutzt, um JSON-Dateien zu erstellen.
 use std::fs::File;
-
-// BufWriter schreibt effizienter in Dateien.
 use std::io::BufWriter;
 
 use glam::Vec3;
-
-// Serialize brauchen wir, damit Rust-Strukturen als JSON gespeichert werden können.
 use serde::Serialize;
-
-// SimulationConfig enthält die Daten aus input_config.json.
 use crate::simulation::SimulationConfig;
 
-
-// Metadaten für den IR-Export.
 #[derive(Serialize)]
 struct OutputMetadata {
     sample_rate: u32,
@@ -23,27 +14,18 @@ struct OutputMetadata {
     wall_material: String,
 }
 
-
-// Die eigentlichen Akustik-Ergebnisse.
-// delays_seconds = wann der Schall ankommt
-// pressures = wie stark/leise der Schall ankommt
 #[derive(Serialize)]
 struct OutputHits {
     delays_seconds: Vec<f32>,
     pressures: Vec<f32>,
 }
 
-
-// Gesamtstruktur der ir_output.json.
 #[derive(Serialize)]
 struct IrOutput {
     metadata: OutputMetadata,
     hits: OutputHits,
 }
 
-
-// Datenstruktur für die Visualisierung.
-// Jetzt alles mit Vec3, weil der Raum 3D ist.
 #[derive(Serialize)]
 pub struct VisualizerOutput {
     pub speaker: Vec3,
@@ -52,9 +34,6 @@ pub struct VisualizerOutput {
     pub rays: Vec<Vec<Vec3>>,
 }
 
-
-// Exportiert die akustischen Ergebnisse in ir_output.json.
-// Wichtig für die DSP-/Convolution-Pipeline.
 pub fn export_results(
     delays: Vec<f32>,
     pressure: Vec<f32>,
@@ -89,12 +68,6 @@ pub fn export_results(
 }
 
 
-// Exportiert die Ray-Pfade für Debugging/Visualisierung.
-//
-// Mini-Checks:
-// - fliegen die Rays korrekt?
-// - prallen sie an den Flächen ab?
-// - sieht der Raum logisch aus?
 pub fn export_visualisation_data(
     paths: Vec<Vec<Vec3>>,
     config: &SimulationConfig,

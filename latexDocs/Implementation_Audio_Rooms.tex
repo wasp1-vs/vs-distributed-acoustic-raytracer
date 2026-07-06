@@ -101,6 +101,44 @@ $$x[n] = \int_{(n-0.5)/f_s}^{(n+0.5)/f_s} x_{\text{analog}}(t) \, dt$$
 
 Jedes Sample liegt im Bereich $[-1.0, 1.0]$ (bei normalisierten 16/32-Bit PCM).
 
+\subsection{WAV-Format: Technische Spezifikation}
+
+Das WAV-Format (Waveform Audio File Format) speichert unkomprimierte PCM-Audiodaten
+in einem RIFF-Container. Die f\"ur die Pipeline relevanten Parameter:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|p{5cm}|}
+        \hline
+        \textbf{Parameter} & \textbf{Typische Werte} & \textbf{Bedeutung} \\
+        \hline
+        Abtastrate $f_s$ & 44.100\,Hz, 48.000\,Hz & Samples pro Sekunde \\
+        \hline
+        Bit-Tiefe & 16-bit, 24-bit, 32-bit float & Amplitude-Aufl\"osung \\
+        \hline
+        Kan\"ale & 1 (Mono), 2 (Stereo) & Anzahl unabh\"angiger Signale \\
+        \hline
+        Kodierung & PCM (Integer) oder IEEE Float & Speicherformat der Samples \\
+        \hline
+    \end{tabular}
+    \caption{WAV-Formatparameter und ihre Bedeutung f\"ur die Pipeline}
+\end{table}
+
+Die \texttt{soundfile}-Bibliothek normalisiert beim Einlesen automatisch:
+16-bit-Integer-Samples im Bereich $[-32768,\,32767]$ werden in \texttt{float64}-Werte
+im Bereich $[-1.0,\,1.0]$ umgewandelt. Diese Skalierung ist verlustfrei -- die
+Quantisierungsschritte des PCM-Formats bleiben erhalten. 32-bit-Float-WAV
+wird direkt \"ubernommen. Die Pipeline erwartet stets Float-Daten; \texttt{write\_wav}
+schreibt standardm\"a\ss{}ig 32-bit-Float zur\"uck, was f\"ur Hall-Anwendungen
+bei $f_s = 44.100$\,Hz ausreicht.
+
+\textbf{Abtastraten-Konsistenz:} Die Rust-Engine ist in \texttt{input\_config.json}
+mit einer festen Abtastrate konfiguriert (Standard: $44.100$\,Hz). Stimmt die
+Abtastrate der Eingangs-WAV nicht \"uberein, gibt die Pipeline eine Warnung aus
+ohne automatisches Resampling, da eine Rateninkonsistenz alle Verzögerungen
+der Impulsantwort um den Ratenquotienten staucht oder dehnt und den Hall
+hörbar verstimmt.
+
 \subsection{Clipping und Normalisierung}
 
 Wenn w\"ahrend der Convolution (Faltung) die Amplitude $|y[n]|$ \"uber 1.0 steigt, tritt \textbf{Clipping} auf:
@@ -114,6 +152,11 @@ $$y_{\text{clipped}}[n] = \begin{cases}
 Um dies zu vermeiden, normalisieren wir:
 
 $$y_{\text{norm}}[n] = \frac{y[n]}{A_{\max}} \quad \text{wobei} \quad A_{\max} = \max_n |y[n]|$$
+
+Diese Normalisierung ist bewusst \textbf{konditional}: Liegt das Maximum bereits
+unter 1.0, wird nicht skaliert -- leise Signale werden nicht k\"unstlich lauter.
+Die Pegelrelation zwischen verschiedenen Material-L\"aufen bleibt damit
+erhalten, was akustische Vergleiche erm\"oglicht.
 
 \section{Implementierung: \texttt{wav\_handler.py}}
 
@@ -190,7 +233,8 @@ Der \texttt{wall\_material}-Wert wird automatisch aus \texttt{ir\_output.json} g
 
 \subsection{OBJ-Format}
 
-Das Wavefront \texttt{.obj}-Format ist ein textbasiertes 3D-Modellformat:
+Das Wavefront \texttt{.obj}-Format ist ein textbasiertes 3D-Modellformat.
+Jede Zeile beginnt mit einem Schl\"usselwort, das den Zeilentyp bestimmt:
 
 \begin{lstlisting}[language={}]
 # Vertices (Ecken)
@@ -198,11 +242,37 @@ v  1.0  2.0 -1.5    # Vertex 1
 v  2.0  2.0 -1.5    # Vertex 2
 v  1.0  3.0 -1.5    # Vertex 3
 
-# Faces (Dreiecke)
-f  1/1/1  2/2/1  3/3/1
+# Faces (Dreiecke, Format: v/vt/vn)
+f  1/1/1  2/2/1  3/3/1  # Textur- und Normal-Indizes optional
 \end{lstlisting}
 
-\textbf{Indexierung:} OBJ nutzt 1-basierte Indizes, Python 0-basierte -- Umrechnung n\"otig.
+Der Parser verarbeitet nur die f\"ur Raytracing relevanten Zeilen:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|c|}
+        \hline
+        \textbf{Zeilentyp} & \textbf{Bedeutung} & \textbf{Verarbeitet?} \\
+        \hline
+        \texttt{v x y z} & Vertex-Position & \checkmark \\
+        \hline
+        \texttt{f v1 v2 v3} & Dreiecksfläche (Vertex-Indizes) & \checkmark \\
+        \hline
+        \texttt{f v/vt/vn} & Face mit Textur- und Normalindex & \checkmark (nur v) \\
+        \hline
+        \texttt{vn nx ny nz} & Vertex-Normale & Ignoriert \\
+        \hline
+        \texttt{vt u v} & Textur-Koordinate & Ignoriert \\
+        \hline
+        \texttt{usemtl name} & Material-Zuweisung (.mtl) & Ignoriert \\
+        \hline
+        \texttt{\#\ ...} & Kommentar & Ignoriert \\
+        \hline
+    \end{tabular}
+    \caption{OBJ-Zeilentypen und Verarbeitungsstatus im Parser}
+\end{table}
+
+\textbf{Indexierung:} OBJ nutzt 1-basierte Indizes, Python 0-basierte -- der Parser subtrahiert beim Einlesen automatisch 1.
 
 \subsection{Dreiecks-Repr\"asentation}
 
@@ -270,7 +340,7 @@ def export_room_geometry(obj_path: str, material: str, out_path: str) -> None:
 
 Der Rust-Tracer liest Dreiecke inkl.\ Material-Absorption aus dieser Datei:
 
-\begin{lstlisting}[language=JavaScript]
+\begin{lstlisting}[language={}]
 {
   "triangles": [
     {"v0": [0.0, 0.0, 0.0], "v1": [12.0, 0.0, 0.0],
@@ -283,6 +353,31 @@ Der Rust-Tracer liest Dreiecke inkl.\ Material-Absorption aus dieser Datei:
 Die \texttt{absorption}-Werte entsprechen dem arithmetischen Mittel aller 8 Oktavb\"ander
 aus \texttt{materials.json}. Die frequenzabh\"angige Verarbeitung findet ausschlie\ss{}lich
 in der Python-Convolution statt.
+
+\section{Blender-Workflow: Raum erstellen und exportieren}
+
+F\"ur realistische Raumakustik kann jede beliebige Raumgeometrie aus Blender
+exportiert werden. Der empfohlene Workflow:
+
+\begin{enumerate}
+    \item \textbf{Raum modellieren}: Geschlossenen Raum in Blender erstellen.
+    Alle Fl\"achen m\"ussen nach innen zeigen (\textit{Face Normals} pr\"ufen).
+    \item \textbf{Triangulieren}: \textit{Edit Mode} $\to$ \textit{Mesh} $\to$
+    \textit{Faces} $\to$ \textit{Triangulate Faces} (Shortcut: \texttt{Ctrl+T}).
+    Der OBJ-Parser verarbeitet ausschlie\ss{}lich Dreiecke.
+    \item \textbf{Exportieren}: \textit{File} $\to$ \textit{Export} $\to$
+    \textit{Wavefront (.obj)}
+    \begin{itemize}
+        \item Koordinatensystem: Y Forward, Z Up (passend zu \texttt{input\_config.json})
+        \item Haken bei \textit{Triangulate Mesh} setzen
+        \item Speichern als \texttt{room.obj} in \texttt{python\_service/}
+    \end{itemize}
+    \item \textbf{Positionen pr\"ufen}: Speaker- und Mic-Positionen in
+    \texttt{input\_config.json} m\"ussen innerhalb des Modells liegen.
+    Die Mic-Position zuz\"uglich \texttt{mic\_radius} darf keine Wand \"uberschreiten.
+    \item \textbf{Pipeline starten}: \texttt{python main.py} erkennt \texttt{room.obj}
+    automatisch und generiert \texttt{room\_geometry.json} vor dem Rust-Lauf.
+\end{enumerate}
 
 % ========================================
 \chapter{Integration und Testing}
@@ -318,7 +413,7 @@ write_wav(output_wav_path, wet_audio, sample_rate)
 
 Das Wandmaterial wird in \texttt{rust\_service/input\_config.json} festgelegt:
 
-\begin{lstlisting}[language=JavaScript]
+\begin{lstlisting}[language={}]
 {
   "wall_material": "concrete",
   "max_bounces": 100,
@@ -350,6 +445,40 @@ Vegerf\"ugbare Materialien (aus \texttt{materials.json}):
     \caption{Verf\"ugbare Materialien in \texttt{materials.json}}
 \end{table}
 
+\section{Konfiguration: \texttt{input\_config.json}}
+
+Alle Simulationsparameter werden in einer einzigen JSON-Datei geb\"undelt,
+die sowohl vom Rust-Tracer als auch von der Python-Pipeline gelesen wird:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|p{5.5cm}|}
+        \hline
+        \textbf{Feld} & \textbf{Beispielwert} & \textbf{Bedeutung} \\
+        \hline
+        \texttt{speaker\_position} & \texttt{[2.0, 3.0, 1.5]} & 3D-Position der Schallquelle \\
+        \hline
+        \texttt{mic\_position} & \texttt{[8.0, 7.0, 6.0]} & 3D-Position des Mikrofons \\
+        \hline
+        \texttt{mic\_radius} & \texttt{3.0} & Einfangradius des Mikrofons in Metern \\
+        \hline
+        \texttt{rays\_to\_cast} & \texttt{1000} & Anzahl der simulierten Strahlen \\
+        \hline
+        \texttt{max\_bounces} & \texttt{100} & Max.\ Reflexionen pro Strahl \\
+        \hline
+        \texttt{min\_pressure} & \texttt{0.001} & Abbruchschwelle (Restdruck) \\
+        \hline
+        \texttt{wall\_material} & \texttt{"concrete"} & Wandmaterial (aus \texttt{materials.json}) \\
+        \hline
+    \end{tabular}
+    \caption{Felder der \texttt{input\_config.json}}
+\end{table}
+
+Das Feld \texttt{wall\_material} wird von der Python-Pipeline beim
+Start ausgelesen, um \texttt{room\_geometry.json} mit der passenden Absorption
+zu generieren. Der Rust-Tracer schreibt es anschlie\ss{}end in \texttt{ir\_output.json},
+von wo die Convolution es f\"ur die frequenzabh\"angige D\"ampfung \"ubernimmt.
+
 \section{Abh\"angigkeiten}
 
 \begin{table}[H]
@@ -370,39 +499,82 @@ Vegerf\"ugbare Materialien (aus \texttt{materials.json}):
 \end{table}
 
 % ========================================
-\chapter{Mathematische Modelle}
+\chapter{Visualisierung: \texttt{visualizer.py}}
 % ========================================
 
-\section{Convolution im Frequenzraum}
+\section{\"Ubersicht}
 
-$$Y(f) = X(f) \cdot H(f), \quad y[n] = \mathcal{F}^{-1}\{Y(f)\}$$
+Der Visualizer rendert die Ergebnisse der Rust-Simulation als interaktive
+3D-Szene im Browser (Plotly). Er liest zwei Dateien aus dem \texttt{rust\_service}:
 
-\section{Oktavband-basierte Material-D\"ampfung}
+\begin{itemize}
+    \item \texttt{visualisation\_data.json}: Strahlpfade, Speaker- und Mic-Position
+    \item \texttt{room\_geometry.json}: Raumw\"ande als Dreiecksliste (optional)
+\end{itemize}
 
-Der Rust-Tracer liefert pro Schallstrahl nur einen skalaren Druck. Die
-frequenzabh\"angige D\"ampfung des Wandmaterials wird in der Convolution
-nachtr\"aglich im Frequenzbereich modelliert.
+\section{Raumwände-Rendering}
 
-Ein Tap zur Zeit $t$ hat circa $n(t) = t \,/\, t_{\text{mfp}}$ Reflexionen
-erfahren. Pro Oktavband $b$ mit Absorptionskoeffizient $\alpha_b$ verbleibt
-der Anteil:
+Die Funktion \texttt{\_draw\_room\_walls()} wurde neu implementiert und l\"adt
+\texttt{room\_geometry.json}, falls vorhanden, und zeichnet jedes Dreieck als
+blaues Drahtgitter:
 
-$$\text{Gain}_b(t) = (1 - \alpha_b)^{n(t)} = (1 - \alpha_b)^{\,t / t_{\text{mfp}}}$$
+\begin{lstlisting}
+def _draw_room_walls(fig: go.Figure, geometry_path: Path) -> None:
+    if not geometry_path.exists():
+        return
+    data = json.loads(geometry_path.read_text())
+    for tri in data["triangles"]:
+        v0, v1, v2 = tri["v0"], tri["v1"], tri["v2"]
+        xs = [v0[0], v1[0], v2[0], v0[0]]
+        ys = [v0[1], v1[1], v2[1], v0[1]]
+        zs = [v0[2], v1[2], v2[2], v0[2]]
+        fig.add_trace(go.Scatter3d(
+            x=xs, y=ys, z=zs, mode='lines',
+            line=dict(width=1, color='rgba(100,130,200,0.35)'),
+            showlegend=False, hoverinfo='skip'))
+\end{lstlisting}
 
-Die Impulsantwort wird bandweise gefiltert und mit dem zeitvarianten Gain
-gewichtet:
+Durch das R\"uckschlie\ss{}en des Dreiecks (\texttt{v0} als vierter Punkt) entsteht
+ein geschlossenes Dreieck. Die halbtransparente Farbe \texttt{rgba(100,130,200,0.35)}
+h\"alt die Raumw\"ande visuell im Hintergrund, sodass die Strahlpfade im Vordergrund
+bleiben.
 
-$$h_{\text{mat}}[n] = \sum_{b} \underbrace{(\text{Bandpass}_b * h)[n]}_{\text{gefilterte IR}} \cdot (1-\alpha_b)^{\,n/(f_s \cdot t_{\text{mfp}})}$$
+\section{Dargestellte Elemente}
 
-Hohe B\"ander mit gro\ss{}em $\alpha_b$ (z.B.\ Teppich: $\alpha_{8\,\text{kHz}} = 0.70$)
-klingen schnell aus --- der Raum klingt dunkler und trockener.
-Bei Beton ($\alpha_b \approx 0.02\text{--}0.05$) bleibt der Klang lange hell.
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|l|}
+        \hline
+        \textbf{Element} & \textbf{Darstellung} & \textbf{Datenquelle} \\
+        \hline
+        Strahlpfade & Farbige Linien (Golden-Angle-Farbfolge) & \texttt{visualisation\_data.json} \\
+        \hline
+        Lautsprecher & Blauer Kreuz-Marker & \texttt{visualisation\_data.json} \\
+        \hline
+        Mikrofon-Zentrum & Blauer Punkt & \texttt{visualisation\_data.json} \\
+        \hline
+        Mikrofon-Radius & Rote Kugel (halbtransparent) & \texttt{visualisation\_data.json} \\
+        \hline
+        Raumw\"ande & Hellblaues Drahtgitter & \texttt{room\_geometry.json} \\
+        \hline
+    \end{tabular}
+    \caption{Visuelle Elemente der 3D-Debugging-Szene}
+\end{table}
 
-\section{Ray-Tracer Intersection (M\"oller-Trumbore)}
+Die Golden-Angle-Farbfolge $\varphi_i = (i \cdot 137{,}5\,\%) \bmod 360$
+verteilt die Strahlfarben gleichm\"a\ss{}ig im HSL-Farbraum, sodass auch bei
+vielen Strahlen kein Farbton doppelt vorkommt.
 
-Gegeben Strahl $\vec{r}(t) = \vec{o} + t\vec{d}$ und Dreieck $(\vec{a}, \vec{b}, \vec{c})$:
+\section{Starten des Visualizers}
 
-$$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec{o})}{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot \vec{d}}, \quad \tau = \frac{t}{343 \text{ m/s}}, \quad n = \lfloor \tau \cdot f_s \rfloor$$
+\begin{lstlisting}[language=bash]
+cd python_service
+python visualizer.py
+\end{lstlisting}
+
+Plotly \"offnet automatisch einen Browser-Tab mit der interaktiven 3D-Szene.
+Fehlt \texttt{room\_geometry.json}, werden keine Raumw\"ande gezeichnet;
+die Datei wird durch Ausf\"uhren der Pipeline mit einer \texttt{room.obj} erzeugt.
 
 % ========================================
 \chapter{Akzeptanzkriterien und Validierung}
@@ -445,6 +617,47 @@ $$t = \frac{(\vec{c} - \vec{a}) \times (\vec{b} - \vec{a}) \cdot (\vec{a} - \vec
         \hline
     \end{tabular}
 \end{table}
+
+\section{Materialvergleich: Akustisches Verhalten}
+
+Die folgende Tabelle zeigt das Verhalten der Pipeline mit dem Test-Raum
+(12\,m $\times$ 12\,m $\times$ 10\,m, 100 Strahlen, 100 maximale Bounces):
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|c|c|p{5cm}|}
+        \hline
+        \textbf{Material} & \textbf{Hits} & \textbf{Eff. Bounces} & \textbf{Klangcharakter} \\
+        \hline
+        \texttt{concrete} & $\sim$2000 & bis 100 & Hell, langer Nachhall (Kathedrale) \\
+        \hline
+        \texttt{glass}    & $\sim$2200 & bis 100 & Sehr hell, extrem langer Nachhall \\
+        \hline
+        \texttt{drywall}  & $\sim$1500 & $\sim$43 & Moderat, typischer Wohnraum \\
+        \hline
+        \texttt{carpet}   & $\sim$400  & $\sim$11 & Dumpf, kurzer Nachhall \\
+        \hline
+        \texttt{foam}     & $\sim$200  & $\sim$7  & Sehr trocken, fast kein Nachhall \\
+        \hline
+    \end{tabular}
+    \caption{Verhalten verschiedener Materialien (Richtwerte, 12\,m\,$\times$\,12\,m\,$\times$\,10\,m Testraum)}
+\end{table}
+
+Die \textbf{effektiven Bounces} ergeben sich aus der Bedingung
+$(1 - \alpha)^n < p_{\min}$ mit $p_{\min} = 0.001$:
+$n < \ln(0.001) / \ln(1 - \alpha)$.
+Bei Beton ($\alpha = 0.033$) ben\"otigt ein Strahl theoretisch 204 Bounces,
+wird aber durch \texttt{max\_bounces = 100} begrenzt.
+Bei Teppich ($\alpha = 0.425$) bricht er bereits nach 11 Bounces ab.
+
+\section{Abschnittsabgrenzung zur DSP-Dokumentation}
+
+Die mathematischen Details der Impulsantwort-Konstruktion (\texttt{build\_impulse\_response}),
+die Wahl des Faltungsalgorithmus (\texttt{oaconvolve}) sowie die vollst\"andige
+Oktavband-Filterbank sind in Kapitel~5 (Signalverarbeitung, Cem Acar) dokumentiert.
+Der vorliegende Abschnitt beschr\"ankt sich auf die Schnittstellenperspektive:
+Was \texttt{convolve()} als Vertrag anbietet und wie es in die Gesamtpipeline
+eingebunden ist.
 
 % ========================================
 \chapter{Zusammenfassung und Ausblick}

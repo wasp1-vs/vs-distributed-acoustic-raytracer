@@ -152,25 +152,6 @@ def convolve(
     material: str | None = None,
     mean_free_path_s: float = 0.02,
 ) -> np.ndarray:
-    """Faltung des trockenen Audios mit dem aus `ir_data` erzeugten IR.
-
-    Args:
-        dry_audio: 1D (mono) oder 2D (samples x channels) Audio-Array.
-        sample_rate: Sample-Rate von `dry_audio` in Hz; muss zur IR-Metadata passen.
-        ir_data: Geparstes JSON-Dict vom Ray-Tracer (Jians Output).
-            Erwartetes Schema:
-                ir_data["metadata"]["sample_rate"]: int
-                ir_data["hits"]["delays_seconds"]: list[float]
-                ir_data["hits"]["pressures"]: list[float]
-        material: Optionaler Material-Name (siehe MATERIALS). Aktiviert
-            frequenzabhaengige Daempfung. None = breitbandig wie bisher.
-        mean_free_path_s: Mittlere Zeit zwischen zwei Reflexionen in Sekunden;
-            steuert wie schnell die Material-Absorption mit der Hall-Zeit greift.
-
-    Returns:
-        Raw wet audio als float32-NumPy-Array. Nicht normalisiert -
-        Kais' write_wav faengt Clipping ab.
-    """
     if not isinstance(dry_audio, np.ndarray):
         raise TypeError(f"dry_audio must be np.ndarray, got {type(dry_audio).__name__}")
     if dry_audio.size == 0:
@@ -235,7 +216,7 @@ if __name__ == "__main__":
     print(f"wet dtype:  {wet.dtype}")
     print("sanity check ok.")
 
-    # Material-Check: dichte IR ueber 0.5s, viele Reflexionen.
+    
     rng = np.random.default_rng(0)
     n_taps = 2000
     dense_ir = {

@@ -12,11 +12,9 @@ from obj_parser import export_room_geometry
 def main():
     print("--- Starting Acoustic Reverb Pipeline ---")
 
-    # Basis-Verzeichnis = Ordner von main.py (python_service/), egal von wo gestartet
     base_dir = Path(__file__).resolve().parent
 
-    # 1. Define the input/output paths
-    # Betriebssystem prüfen und .exe nur unter Windows anhängen
+
     binary_name = "rust_service.exe" if sys.platform == "win32" else "rust_service"
     rust_binary_path = str(base_dir / ".." / "rust_service" / "target" / "release" / binary_name)
     json_path = "ir_output.json"
@@ -31,9 +29,9 @@ def main():
         sys.exit(1)
 
     # ---------------------------------------------------------
-    # STEP 0: OBJ → room_geometry.json (wenn room.obj vorhanden)
+    # STEP 0: OBJ -> room_geometry.json
     # ---------------------------------------------------------
-    # Finde rust_service-Verzeichnis (enthält input_config.json)
+    # Find rust_service directory (contains input_config.json)
     rust_service_dir = Path(rust_binary_path).resolve().parent
     for parent in Path(rust_binary_path).resolve().parents:
         if (parent / "input_config.json").exists():

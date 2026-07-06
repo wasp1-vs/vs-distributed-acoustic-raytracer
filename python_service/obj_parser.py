@@ -18,37 +18,23 @@ def load_obj_to_triangles(file_path: str) -> list:
 
     with path.open('r') as f:
         for line in f:
-            # Remove leading and trailing whitespace
             line = line.strip()
-            
-            # Read vertices: 'v 1.0 2.0 -1.5'
             if line.startswith('v '):
                 parts = line.split()
                 x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
                 vertices.append([x, y, z])
-                
-            # Read faces: 'f 1/1/1 2/2/1 3/3/1'
             elif line.startswith('f '):
                 parts = line.split()
-                # OBJ indices start at 1, Python lists at 0. Hence the '- 1'
-                # We split by '/' in case textures/normals are included in the OBJ
+                # OBJ indices are 1-based; split by '/' to ignore texture/normal indices
                 v1_idx = int(parts[1].split('/')[0]) - 1
                 v2_idx = int(parts[2].split('/')[0]) - 1
                 v3_idx = int(parts[3].split('/')[0]) - 1
-                
-                # Assemble the final triangle with actual coordinates
-                triangle = [
-                    vertices[v1_idx],
-                    vertices[v2_idx],
-                    vertices[v3_idx]
-                ]
-                triangles.append(triangle)
-                
+                triangles.append([vertices[v1_idx], vertices[v2_idx], vertices[v3_idx]])
     return triangles
 
 
 def _mean_absorption(material: str) -> float:
-    """Liest materials.json und gibt den mittleren Absorptionswert zurück."""
+    """Returns the mean absorption coefficient for a material from materials.json."""
     data = json.loads(_MATERIALS_JSON.read_text())
     available = list(data["materials"].keys())
     if material not in data["materials"]:
@@ -58,12 +44,11 @@ def _mean_absorption(material: str) -> float:
 
 
 def export_room_geometry(obj_path: str, material: str, out_path: str) -> None:
-    """Liest ein .obj-File und schreibt room_geometry.json für den Rust-Tracer.
+    """Converts a .obj file to room_geometry.json for the Rust ray tracer.
 
-    Jedes Dreieck bekommt die mittlere Absorptionskonstante des Wandmaterials
-    (aus materials.json). Der Rust-Tracer nutzt diesen Wert für den
-    Energieverlust pro Reflexion; die frequenzabhängige Faltung übernimmt
-    Python (convolution.py mit apply_material_absorption).
+    Each triangle receives the mean absorption of the given material
+    (scalar for the tracer). Frequency-dependent shaping is handled
+    separately by convolution.py.
     """
     triangles_raw = load_obj_to_triangles(obj_path)
     absorption = _mean_absorption(material)
