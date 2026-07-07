@@ -102,12 +102,13 @@ die Ergebnisse zusammen.
 
 Die Rust-Engine beschreibt das akustische Verhalten des Raums nicht als
 kontinuierliche Funktion, sondern als Liste diskreter Ereignisse. Jeder Strahl,
-der das Empfängervolumen erreicht, erzeugt einen Treffer aus zwei Zahlen. Die
-erste ist die Ankunftsverzögerung $\tau_j$ in Sekunden, gemessen ab dem
-Aussenden des Impulses an der Quelle. Die zweite ist der skalare Restdruck
-$p_j$, der nach allen Wandkontakten und der geometrischen Ausbreitungsdämpfung
-übrig bleibt. Über Jians Prozessbrücke erreichen diese Daten den Faltungskern
-als geparstes JSON-Dictionary mit folgendem Schema:
+der das Empfängervolumen erreicht, hinterlässt zwei Zahlen: die
+Ankunftsverzögerung $\tau_j$ in Sekunden, gemessen ab dem Aussenden des
+Impulses an der Quelle, und den skalaren Restdruck $p_j$, also das, was nach
+allen Wandkontakten und der geometrischen Ausbreitungsdämpfung vom
+Ausgangsdruck übrig ist. Mehr liefert die Engine pro Treffer nicht. Über Jians
+Prozessbrücke kommen diese Daten als geparstes JSON-Dictionary beim
+Faltungskern an:
 
 \begin{lstlisting}[style=cemdsp, caption={Erwartetes Schema des Engine-Ergebnisses (Auszug aus dem Docstring von \texttt{convolve}).}, label={lst:schema}]
 ir_data["metadata"]["sample_rate"]: int
@@ -115,18 +116,18 @@ ir_data["hits"]["delays_seconds"]: list[float]
 ir_data["hits"]["pressures"]: list[float]
 \end{lstlisting}
 
-Die beiden Listen sind positionsgleich: Der $j$-te Eintrag in
+Die beiden Listen sind positionsgleich, der $j$-te Eintrag in
 \texttt{delays\_seconds} gehört zum $j$-ten Eintrag in \texttt{pressures}.
-Konzeptionell ist diese Trefferliste bereits eine Impulsantwort, allerdings eine
-zeitkontinuierliche. Sie ist eine gewichtete Summe von Dirac-Impulsen
+Genau genommen ist diese Trefferliste schon eine Impulsantwort, nur eben eine
+zeitkontinuierliche: eine gewichtete Summe von Dirac-Impulsen
 \[
     h(t) \;=\; \sum_{j} p_j \,\delta(t - \tau_j).
 \]
-Für die zeitdiskrete Faltung aus Abschnitt~2.3 wird jedoch eine Folge $h[i]$
-auf dem Abtastraster des Audiosignals benötigt. Die Funktion
-\texttt{build\_impulse\_response} leistet genau diese Übersetzung. Sie ist
-frei von jedem Wissen über Dateiformate, Subprozesse oder Raumgeometrie und
-arbeitet ausschließlich auf den beiden Zahlenlisten und der Abtastrate.
+Gebraucht wird für die zeitdiskrete Faltung aus Abschnitt~2.3 aber eine Folge
+$h[i]$ auf dem Abtastraster des Audiosignals. Diese Übersetzung leistet
+\texttt{build\_impulse\_response}, und nur sie: Die Funktion weiß nichts über
+Dateiformate, Subprozesse oder Raumgeometrie, sie sieht allein die beiden
+Zahlenlisten und die Abtastrate.
 
 \subsubsection{Zeitdiskretisierung und Quantisierungsfehler}
 \label{subsubsec:quantisierung}
@@ -136,69 +137,69 @@ nächstgelegenen Abtastindex:
 \[
     i_j \;=\; \operatorname{round}\!\bigl(\tau_j \cdot f_s\bigr).
 \]
-Bei der Projekt-Abtastrate $f_s = 44{,}1$~kHz ($44100$~Hz; im Fließtext
-durchgängig als $44{,}1$~kHz notiert) liegt zwischen zwei Abtastwerten eine
-Periode von $1/f_s \approx 22{,}68~\mu\mathrm{s}$. Die Rundung ist symmetrisch.
-Der maximale Zeitfehler eines Treffers beträgt daher eine halbe Abtastperiode:
+Wie viel Genauigkeit kostet das? Bei der Projekt-Abtastrate
+$f_s = 44{,}1$~kHz ($44100$~Hz; im Fließtext durchgängig als $44{,}1$~kHz
+notiert) liegt zwischen zwei Abtastwerten eine Periode von
+$1/f_s \approx 22{,}68~\mu\mathrm{s}$, und weil symmetrisch gerundet wird,
+verfehlt ein Treffer seinen wahren Zeitpunkt um höchstens eine halbe
+Abtastperiode:
 \[
     \bigl|\Delta t\bigr|_{\max}
     \;=\; \frac{0{,}5}{f_s}
     \;=\; \frac{0{,}5}{44100~\text{Hz}}
     \;\approx\; 11{,}34~\mu\mathrm{s}.
 \]
-Physikalisch entspricht dieser Fehler bei einer Schallgeschwindigkeit von
-etwa $343$~m/s einem Weglängenfehler von rund $3{,}9$~mm, also weniger als der
-Dicke einer Wandverkleidung. Die von der Engine ohnehin nur näherungsweise
-bestimmten Laufwege sind deutlich unschärfer. Auch spektral bleibt der Effekt
-klein. Selbst im höchsten modellierten Oktavband um $4$~kHz (Periodendauer
-$250~\mu\mathrm{s}$) verschiebt der maximale Rundungsfehler die Phase eines
-einzelnen Treffers um höchstens $16^\circ$. Eine Subsample-genaue Platzierung
-der Treffer wäre möglich, etwa durch bandbegrenzte Interpolation mit
-gefensterten $\operatorname{sinc}$-Kernen. Sie würde aber jeden Treffer von
-einem einzelnen Array-Eintrag zu einem Kurzfilter aufblähen. Für eine
-Hall-Anwendung, bei der sich Tausende Reflexionen statistisch überlagern, steht
-dieser Aufwand in keinem Verhältnis zum Nutzen. Die Rundung ist daher eine
-bewusste und dokumentierte Vereinfachung.
+Bei etwa $343$~m/s Schallgeschwindigkeit entsprechen diese
+$11{,}34~\mu\mathrm{s}$ einem Weglängenfehler von rund $3{,}9$~mm, weniger als
+eine Wandverkleidung dick ist; die Laufwege, die die Engine liefert, sind
+ohnehin deutlich unschärfer. Auch spektral passiert wenig. Selbst im höchsten
+modellierten Oktavband um $4$~kHz (Periodendauer $250~\mu\mathrm{s}$)
+verschiebt der maximale Rundungsfehler die Phase eines einzelnen Treffers um
+rund $16^\circ$. Natürlich ließe sich jeder Treffer subsample-genau
+platzieren, etwa über bandbegrenzte Interpolation mit gefensterten
+$\operatorname{sinc}$-Kernen, doch dann würde aus jedem einzelnen Array-Eintrag
+ein Kurzfilter. Diesen Preis zahlt eine Hall-Anwendung nicht, in der sich
+Tausende Reflexionen statistisch überlagern. Die Rundung bleibt, als bewusste
+und dokumentierte Vereinfachung.
 
-Aus dem größten gerundeten Index ergibt sich unmittelbar die Länge der
-Impulsantwort: $M = \max_j i_j + 1$. Die Länge wird also nicht konfiguriert,
-sondern folgt aus den Daten. Für die in Abbildung~\ref{fig:ir-stem} gezeigte
-Beispiel-Impulsantwort mit Treffern bis knapp $0{,}45$~s ergeben sich
-$M = 19842$ Samples. Der Speicherbedarf des \texttt{float64}-Arrays liegt
-damit bei rund $155$~KiB und ist unkritisch.
+Die Länge der Impulsantwort folgt aus dem größten gerundeten Index,
+$M = \max_j i_j + 1$; konfiguriert wird sie nicht, sie steckt in den Daten.
+Für die Beispiel-Impulsantwort aus Abbildung~\ref{fig:ir-stem}, deren Treffer
+bis knapp $0{,}45$~s reichen, sind das $M = 19842$ Samples, als
+\texttt{float64}-Array rund $155$~KiB. Das ist unkritisch.
 
 \subsubsection{Akkumulation gleichzeitiger Treffer mit \texttt{np.add.at}}
 \label{subsubsec:akkumulation}
 
 Nach der Rundung ist die Abbildung von Treffern auf Indizes nicht mehr
-injektiv. Zwei Strahlen mit ähnlicher Weglänge können im selben Abtastwert
-landen. Physikalisch überlagern sich ihre Druckanteile additiv, also muss auch
-die Diskretisierung summieren statt überschreiben. Genau hier liegt ein
-bekannter Fallstrick bei NumPy. Die naheliegende Zuweisung
-\texttt{ir[indices] = pressures} überschreibt schlicht. Bei doppelten Indizes
-bleibt nur der zuletzt geschriebene Wert stehen. Auch die Inkrement-Form
-\texttt{ir[indices] += pressures} löst das Problem nicht, denn sie ist
-gepuffert. NumPy liest die alten Werte einmal aus, addiert und schreibt zurück,
-sodass pro Index nur ein Beitrag wirksam wird und alle weiteren stillschweigend
-verloren gehen. Die ungepufferte Variante \texttt{np.add.at(ir, indices,
-pressures)} führt die Addition dagegen für jedes Index-Vorkommen einzeln aus und
-akkumuliert korrekt.
+injektiv, zwei Strahlen mit ähnlicher Weglänge können im selben Abtastwert
+landen. Ihre Druckanteile überlagern sich physikalisch additiv. Also muss auch
+die Diskretisierung summieren statt überschreiben, und genau an dieser Stelle
+hat NumPy einen bekannten Fallstrick. Die naheliegende Zuweisung
+\texttt{ir[indices] = pressures} überschreibt schlicht, bei doppelten Indizes
+überlebt nur der zuletzt geschriebene Wert. Auch die Inkrement-Form
+\texttt{ir[indices] += pressures} hilft nicht weiter: Sie ist gepuffert, NumPy
+liest die alten Werte einmal aus, addiert und schreibt zurück, pro Index wird
+also nur ein Beitrag wirksam und der Rest geht stillschweigend verloren.
+Korrekt akkumuliert erst die ungepufferte Variante
+\texttt{np.add.at(ir, indices, pressures)}, die die Addition für jedes
+Index-Vorkommen einzeln ausführt.
 
-Ein Beispiel macht das konkret. Zwei Strahlen treffen nach
+Ein Zahlenbeispiel. Zwei Strahlen treffen nach
 $\tau_1 = 0{,}049998$~s mit $p_1 = 0{,}6$ und nach $\tau_2 = 0{,}050003$~s mit
-$p_2 = 0{,}3$ ein. Beide runden auf denselben Index:
+$p_2 = 0{,}3$ ein, beide runden auf denselben Index:
 \[
     0{,}049998 \cdot 44100 = 2204{,}91 \;\to\; 2205,
     \qquad
     0{,}050003 \cdot 44100 = 2205{,}13 \;\to\; 2205.
 \]
 Mit \texttt{np.add.at} entsteht der physikalisch richtige Wert
-$h[2205] = 0{,}6 + 0{,}3 = 0{,}9$. Die gepufferte Zuweisung lieferte dagegen
-$h[2205] = 0{,}3$ und unterschlüge zwei Drittel der Reflexionsenergie an dieser
-Stelle. Bei dichten Impulsantworten mit vielen tausend Treffern auf wenigen
-zehntausend Samples sind solche Kollisionen nicht die Ausnahme, sondern der
-Regelfall. Der Fehler würde das Abklingverhalten des gesamten Halls
-systematisch verfälschen. Der vollständige Rechenkern ist kompakt:
+$h[2205] = 0{,}6 + 0{,}3 = 0{,}9$, mit der gepufferten Zuweisung dagegen
+$h[2205] = 0{,}3$, zwei Drittel der Reflexionsenergie an dieser Stelle wären
+unterschlagen. Das ist kein konstruierter Randfall. Dichte Impulsantworten
+drängen viele tausend Treffer auf wenige zehntausend Samples, Kollisionen sind
+dort der Regelfall, und der Fehler verfälschte das Abklingverhalten des
+gesamten Halls systematisch. Der vollständige Rechenkern ist kompakt:
 
 \begin{lstlisting}[style=cemdsp, caption={Diskretisierung und Akkumulation in \texttt{build\_impulse\_response}.}, label={lst:build-ir}]
 indices = np.round(delays * sample_rate).astype(np.int64)
@@ -213,11 +214,11 @@ Formal berechnet dieser Kern die diskrete Impulsantwort
     h[i] \;=\; \sum_{j}\; p_j \cdot \bigl[\, i_j = i \,\bigr],
     \qquad i = 0, \dots, M-1,
 \]
-wobei $[\cdot]$ die Iverson-Klammer bezeichnet. Diese nimmt genau dann den Wert
-eins an, wenn die Bedingung erfüllt ist. Abbildung~\ref{fig:ir-stem} zeigt eine
-so konstruierte Impulsantwort. Der Direktschall erscheint als dominanter erster
-Impuls, gefolgt von einzelnen frühen Reflexionen und einem zunehmend dichten,
-abklingenden Nachhallschwanz.
+mit der Iverson-Klammer $[\cdot]$, die genau dann eins ist, wenn die Bedingung
+erfüllt ist. Wie eine so konstruierte Impulsantwort aussieht, zeigt
+Abbildung~\ref{fig:ir-stem}: der Direktschall als dominanter erster Impuls,
+dahinter einzelne frühe Reflexionen, dann ein zunehmend dichter, abklingender
+Nachhallschwanz.
 
 \begin{figure}[htbp]
     \centering
@@ -233,12 +234,12 @@ abklingenden Nachhallschwanz.
 \label{subsubsec:validierung}
 
 \texttt{build\_impulse\_response} verarbeitet Daten, die aus einem fremden
-Prozess über eine JSON-Datei eintreffen, und markiert damit eine Systemgrenze.
-Fehler in den Eingaben dürfen nicht zu stillschweigend falschen Ergebnissen
-führen, sondern müssen sofort und mit aussagekräftiger Meldung scheitern.
-Innerhalb des Python-Dienstes wird dagegen nicht erneut geprüft. Die
-Fehlerbehandlung konzentriert sich auf den Übergang zwischen den Diensten.
-Die Funktion weist sieben Fehlerklassen explizit zurück:
+Prozess über eine JSON-Datei eintreffen. Das ist eine Systemgrenze, und an ihr
+gilt: lieber sofort und mit aussagekräftiger Meldung scheitern als
+stillschweigend falsch weiterrechnen. Innerhalb des Python-Dienstes wird dafür
+nicht erneut geprüft, die Fehlerbehandlung konzentriert sich auf den Übergang
+zwischen den Diensten. Sieben Fehlerklassen weist die Funktion explizit
+zurück:
 
 \begin{lstlisting}[style=cemdsp, caption={Eingabevalidierung an der Systemgrenze zur Rust-Engine.}, label={lst:validierung}]
 if delays.shape != pressures.shape:
@@ -259,30 +260,28 @@ if sample_rate <= 0:
     raise ValueError(f"sample_rate must be positive, got {sample_rate}")
 \end{lstlisting}
 
-Jede dieser Prüfungen fängt einen realistischen Defekt der vorgelagerten Stufen
-ab. Ungleich lange Listen deuten auf einen Serialisierungsfehler der Engine hin.
-Eine leere Trefferliste bedeutet, dass kein einziger Strahl den Empfänger
+Hinter jeder dieser Prüfungen steht ein realistischer Defekt der vorgelagerten
+Stufen. Ungleich lange Listen deuten auf einen Serialisierungsfehler der Engine
+hin. Eine leere Trefferliste heißt, dass kein einziger Strahl den Empfänger
 erreicht hat, etwa weil Quelle oder Empfänger außerhalb der Raumgeometrie
-platziert wurden. Eine daraus konstruierte leere Impulsantwort würde erst viel
-später als stilles Ausgabesignal auffallen. Negative Verzögerungen sind
-physikalisch unmöglich. NumPy würde sie kommentarlos als Zugriffe vom Array-Ende
-her interpretieren, der Treffer landete also an einer scheinbar gültigen, aber
-falschen Position. Gerade dieser Fall zeigt den Wert der expliziten Prüfung:
-Ohne sie entstünde kein Absturz, sondern ein subtil falsches Klangergebnis.
-Aus demselben Grund werden Verzögerungen und Drücke zusätzlich auf Endlichkeit
-geprüft. Ein einzelner \texttt{NaN}-Wert aus einer fehlgeschlagenen
-Engine-Berechnung passiert den Vorzeichentest unbemerkt, denn jeder Vergleich
-mit \texttt{NaN} ergibt \texttt{False}. Bei der Rundung zu Abtastindizes würde
-er aber ein undefiniertes Ergebnis liefern und die Impulsantwort verfälschen.
+platziert wurden, und eine daraus konstruierte leere Impulsantwort fiele erst
+viel später als stilles Ausgabesignal auf. Heikler sind negative Verzögerungen.
+Physikalisch sind sie unmöglich, aber NumPy interpretiert negative Indizes
+kommentarlos als Zugriffe vom Array-Ende her, der Treffer landete also an einer
+scheinbar gültigen, nur eben falschen Position: kein Absturz, sondern ein
+subtil falsches Klangergebnis. Endlichkeit wird aus demselben Grund geprüft.
+Ein einzelner \texttt{NaN}-Wert aus einer fehlgeschlagenen Engine-Berechnung
+rutscht unbemerkt durch den Vorzeichentest, denn jeder Vergleich mit
+\texttt{NaN} ergibt \texttt{False}, und lieferte bei der Rundung zu
+Abtastindizes ein undefiniertes Ergebnis.
 
-Die aufrufende Funktion \texttt{convolve} ergänzt an derselben Systemgrenze
-zwei weitere Prüfungen. Sie validiert das Dictionary-Schema aus
-Listing~\ref{lst:schema} über eine gezielt abgefangene
-\texttt{KeyError}/\texttt{TypeError}. Zusätzlich vergleicht sie die Abtastrate
-der Impulsantwort mit der des Trockensignals. Stimmen die Raten nicht überein,
-bricht die Verarbeitung ab. Eine Faltung über inkonsistente Zeitraster würde
-sämtliche Verzögerungen um den Ratenquotienten stauchen oder dehnen und den Hall
-hörbar verstimmen.
+Zwei weitere Prüfungen sitzen eine Ebene höher in \texttt{convolve}: die
+Validierung des Dictionary-Schemas aus Listing~\ref{lst:schema} über eine
+gezielt abgefangene \texttt{KeyError}/\texttt{TypeError} und der Vergleich der
+Abtastrate der Impulsantwort mit der des Trockensignals. Weichen die Raten
+voneinander ab, bricht die Verarbeitung ab, denn eine Faltung über
+inkonsistente Zeitraster stauchte oder dehnte sämtliche Verzögerungen um den
+Ratenquotienten. Der Hall wäre hörbar verstimmt.
 
 %----------------------------------------------------------------------
 \subsection{Faltung des Trockensignals}
@@ -293,67 +292,66 @@ hörbar verstimmen.
 
 Mit der diskreten Impulsantwort $h[i]$ der Länge $M$ und dem Trockensignal
 $x[n]$ der Länge $N$ ist der verhallte Ausgang die zeitdiskrete Faltung aus
-Abschnitt~2.3, deren Definition hier nicht wiederholt wird. Zwei Eigenschaften
-der Operation bestimmen die Implementierung. Die erste ist die Ergebnislänge.
-Das vollständige Faltungsprodukt umfasst $N + M - 1$ Samples. Der Modus
-\texttt{mode="full"} gibt genau diese Länge zurück und bewahrt damit den
-kompletten Nachhallschwanz, der nach dem Ende des Trockensignals noch
-ausklingt. Für ein Sekunden-Signal bei $44{,}1$~kHz und die Impulsantwort aus
-Abbildung~\ref{fig:ir-stem} sind das $44100 + 19842 - 1 = 63941$ Samples, also
-rund $1{,}45$~s Audio. Ein beschnittener Modus wie \texttt{"same"} würde den
-Hall hörbar abschneiden.
+Abschnitt~2.3; die Definition wird hier nicht wiederholt. Für die
+Implementierung zählen vor allem zwei Eigenschaften der Operation,
+Ergebnislänge und Rechenaufwand. Das vollständige Faltungsprodukt umfasst
+$N + M - 1$ Samples, und genau diese Länge gibt der Modus \texttt{mode="full"}
+zurück. Nur so überlebt der Nachhallschwanz, der nach dem Ende des
+Trockensignals noch ausklingt; ein beschnittener Modus wie \texttt{"same"}
+würde ihn hörbar kappen. Für ein Sekunden-Signal bei $44{,}1$~kHz und die
+Impulsantwort aus Abbildung~\ref{fig:ir-stem} sind das
+$44100 + 19842 - 1 = 63941$ Samples, rund $1{,}45$~s Audio.
 
-Die zweite Eigenschaft ist der Rechenaufwand. Die direkte Auswertung der
-Faltungssumme benötigt für jeden Ausgabewert bis zu $\min(N, M)$
-Multiplikationen und Additionen, insgesamt also $\mathcal{O}(N \cdot M)$
-Operationen. Für den genannten Fall sind das bereits
+Der Rechenaufwand ist die eigentliche Entwurfsfrage. Wer die Faltungssumme
+direkt auswertet, zahlt für jeden Ausgabewert bis zu $\min(N, M)$
+Multiplikationen und Additionen, insgesamt $\mathcal{O}(N \cdot M)$
+Operationen; schon der genannte Fall kostet damit
 $44100 \cdot 19842 \approx 8{,}8 \cdot 10^{8}$
-Multiply-Accumulate-Operationen für eine einzige Sekunde Audio. Bei einer
-Impulsantwort von einer Sekunde Länge wächst der Aufwand auf knapp
-$2 \cdot 10^{9}$. Die schnelle Faltung über die FFT senkt die Komplexität auf
-$\mathcal{O}\bigl((N + M)\log(N + M)\bigr)$, da beide Signale transformiert,
-spektral multipliziert und rücktransformiert werden (Oppenheim \& Schafer,
-2010). Für $N + M - 1 = 88199$ genügt eine FFT-Länge von $2^{17} = 131072$.
-Die Größenordnung des Aufwands fällt damit von Milliarden auf einige Millionen
-Operationen. Dieses theoretische Verhältnis liegt in der Größenordnung der
+Multiply-Accumulate-Operationen für eine einzige Sekunde Audio, und bei einer
+Impulsantwort von einer Sekunde Länge sind es knapp $2 \cdot 10^{9}$. Die
+schnelle Faltung über die FFT transformiert stattdessen beide Signale,
+multipliziert spektral und transformiert zurück (Oppenheim \& Schafer, 2010),
+Komplexität $\mathcal{O}\bigl((N + M)\log(N + M)\bigr)$. Für
+$N + M - 1 = 88199$ genügt eine FFT-Länge von $2^{17} = 131072$. Aus Milliarden
+Operationen werden einige Millionen. In dieser Größenordnung liegen auch die
 Messwerte in Abschnitt~\ref{subsubsec:benchmark}.
 
 \subsubsection{Overlap-Add und die Wahl von \texttt{oaconvolve}}
 \label{subsubsec:oa}
 
-SciPy bietet für die schnelle Faltung zwei Kandidaten.
-\texttt{signal.fftconvolve} transformiert beide Signale in voller Länge.
-\texttt{signal.oaconvolve} setzt das Overlap-Add-Verfahren um (Oppenheim \&
+SciPy bietet für die schnelle Faltung zwei Kandidaten:
+\texttt{signal.fftconvolve}, das beide Signale in voller Länge transformiert,
+und \texttt{signal.oaconvolve}, die Overlap-Add-Umsetzung (Oppenheim \&
 Schafer, 2010; Virtanen et al., 2020). Overlap-Add zerlegt das lange
-Eingangssignal in Blöcke, faltet jeden Block per FFT mit der Impulsantwort
-und addiert die überlappenden Blockergebnisse zum Gesamtsignal. Die FFT-Länge
-richtet sich dabei nach der Impulsantwort, nicht nach dem Eingangssignal.
-SciPy wählt die Blocklänge intern so, dass der Gesamtaufwand minimal wird.
-Daraus ergeben sich zwei praktische Vorteile. Der Speicherbedarf der
-Transformationen bleibt unabhängig von der Länge des Eingangssignals, was bei
-langen Audiodateien relevant wird. Zudem ist Overlap-Add gerade bei stark
-unterschiedlich langen Operanden asymptotisch günstiger, nämlich
-$\mathcal{O}(N \log M)$ statt $\mathcal{O}\bigl((N+M)\log(N+M)\bigr)$. Genau
-dieser Fall, kurze Impulsantwort und potenziell langes Musiksignal, ist der
-Normalfall dieser Anwendung.
+Eingangssignal in Blöcke, faltet jeden Block per FFT mit der Impulsantwort und
+addiert die überlappenden Blockergebnisse zum Gesamtsignal. Entscheidend ist,
+dass sich die FFT-Länge dabei nach der Impulsantwort richtet und nicht nach dem
+Eingangssignal; die Blocklänge wählt SciPy intern so, dass der Gesamtaufwand
+minimal wird. Praktisch bringt das zweierlei. Der Speicherbedarf der
+Transformationen hängt nicht mehr von der Länge des Eingangssignals ab, was
+bei langen Audiodateien zählt. Und bei stark unterschiedlich langen Operanden,
+kurze Impulsantwort gegen potenziell langes Musiksignal, dem Normalfall dieser
+Anwendung, ist Overlap-Add asymptotisch günstiger, näherungsweise
+$\mathcal{O}(N \log M)$ statt $\mathcal{O}\bigl((N+M)\log(N+M)\bigr)$.
 
-Bei den hier vermessenen Signallängen liefern beide FFT-Varianten praktisch
-identische Laufzeiten (Tabelle~\ref{tab:benchmark}). Die Entscheidung für
-\texttt{oaconvolve} ist daher weniger eine Optimierung des Ist-Zustands als
-eine Absicherung des Skalierungsverhaltens. Der Dienst soll auch mehrminütige
-Aufnahmen falten können, ohne dass Laufzeit oder Speicher zum Problem werden.
-Sind die Operanden so kurz, dass sich die blockweise Zerlegung nicht lohnt,
-fällt \texttt{oaconvolve} intern auf \texttt{fftconvolve} zurück.
+Gemessen macht das bei den hier untersuchten Signallängen keinen Unterschied,
+beide FFT-Varianten liefern praktisch identische Laufzeiten
+(Tabelle~\ref{tab:benchmark}). Die Entscheidung für \texttt{oaconvolve}
+sichert also weniger den Ist-Zustand ab als das Skalierungsverhalten: Der
+Dienst soll auch mehrminütige Aufnahmen falten, ohne dass Laufzeit oder
+Speicher zum Problem werden. Und wo die Operanden für eine blockweise
+Zerlegung zu kurz sind, fällt \texttt{oaconvolve} intern ohnehin auf
+\texttt{fftconvolve} zurück.
 
 \subsubsection{Laufzeit-Benchmark}
 \label{subsubsec:benchmark}
 
-Zur Absicherung der Algorithmuswahl wurde die Faltung eines Trockensignals von
-einer Sekunde Länge ($N = 44100$ Samples) mit Impulsantworten wachsender Länge
-vermessen. Verglichen wurden die direkte Faltung (\texttt{np.convolve}),
-\texttt{fftconvolve} und \texttt{oaconvolve}. Tabelle~\ref{tab:benchmark} fasst
-die Messwerte zusammen, Abbildung~\ref{fig:conv-benchmark} stellt sie
-logarithmisch dar.
+Zur Absicherung der Algorithmuswahl wurde die Faltung eines Trockensignals
+von einer Sekunde Länge ($N = 44100$ Samples) mit Impulsantworten wachsender
+Länge vermessen, jeweils für die direkte Faltung (\texttt{np.convolve}), für
+\texttt{fftconvolve} und für \texttt{oaconvolve}. Die Messwerte stehen in
+Tabelle~\ref{tab:benchmark}; Abbildung~\ref{fig:conv-benchmark} trägt sie
+logarithmisch auf.
 
 \begin{table}[htbp]
     \centering
@@ -376,18 +374,17 @@ logarithmisch dar.
     {\footnotesize Speedup aus den ungerundeten Rohmesswerten berechnet.}
 \end{table}
 
-Die Messreihe bestätigt die Aufwandsanalyse. Die direkte Faltung wächst linear
-mit der IR-Länge $M$. Eine Verdopplung von $M$ verdoppelt in guter Näherung die
-Laufzeit, von $17{,}5$~ms bei $M = 2205$ bis $312{,}5$~ms bei $M = 44100$. Die
-beiden FFT-Varianten bleiben dagegen über den gesamten Messbereich nahezu
-konstant zwischen $0{,}5$ und $1{,}0$~ms. Ihr Aufwand wächst nur logarithmisch
-mit den Signallängen und wird bei diesen Größenordnungen von Konstanten wie
-Speicherbandbreite und FFT-Planung dominiert. Der Speedup gegenüber der direkten
-Methode steigt entsprechend mit der IR-Länge von Faktor $37$ auf Faktor $317$.
-Praktisch heißt das: Selbst die längste vermessene Konfiguration, ein voller
-Nachhall von einer Sekunde, kostet rund eine Millisekunde Rechenzeit pro
-Sekunde Audio. Die Faltung ist damit im Gesamtsystem kein Engpass. Die Laufzeit
-der Pipeline wird von der Strahlverfolgung in der Rust-Engine bestimmt.
+Die Messreihe bestätigt die Aufwandsanalyse. Bei der direkten Faltung
+verdoppelt eine Verdopplung von $M$ in guter Näherung die Laufzeit, von
+$17{,}5$~ms bei $M = 2205$ bis $312{,}5$~ms bei $M = 44100$, also lineares
+Wachstum. Die beiden FFT-Varianten kümmert die IR-Länge dagegen kaum. Sie
+bleiben über den gesamten Messbereich zwischen $0{,}5$ und $1{,}0$~ms, weil
+ihr nur logarithmisch wachsender Aufwand bei diesen Größenordnungen von
+Konstanten wie Speicherbandbreite und FFT-Planung dominiert wird. Entsprechend
+klettert der Speedup mit der IR-Länge von Faktor $37$ auf Faktor $317$. Selbst
+der volle Sekunden-Nachhall kostet damit rund eine Millisekunde Rechenzeit pro
+Sekunde Audio; die Faltung ist im Gesamtsystem kein Engpass. Den Takt der
+Pipeline gibt die Strahlverfolgung in der Rust-Engine vor.
 
 \begin{figure}[htbp]
     \centering
@@ -404,23 +401,22 @@ der Pipeline wird von der Strahlverfolgung in der Rust-Engine bestimmt.
 
 Die Messwerte aus Tabelle~\ref{tab:benchmark} entstanden unter kontrollierten
 Bedingungen. Als Trockensignal dient eine Sekunde weißes Rauschen bei
-$f_s = 44{,}1$~kHz. Die Impulsantworten sind Zufallsrauschen wachsender Länge,
-sodass keine der Varianten von Nullwerten oder besonderer Struktur der Operanden
-profitieren kann. Die Zeitmessung erfolgt mit \texttt{time.perf\_counter}, dem
+$f_s = 44{,}1$~kHz; die Impulsantworten sind Zufallsrauschen wachsender Länge,
+damit keine der Varianten von Nullwerten oder besonderer Struktur der
+Operanden profitiert. Gemessen wird mit \texttt{time.perf\_counter}, dem
 Monotonzeitgeber mit der höchsten verfügbaren Auflösung der
-Python-Standardbibliothek. Für die beiden FFT-Verfahren wird der Bestwert aus
-drei Läufen notiert, um Ausreißer durch konkurrierende Prozesse und
-Cache-Effekte zu unterdrücken. Die direkte Faltung wird wegen ihrer deutlich
-längeren Laufzeit pro Konfiguration nur einmal ausgeführt, was bei Messwerten
-im dreistelligen Millisekundenbereich ausreicht.
+Python-Standardbibliothek. Für die beiden FFT-Verfahren zählt der Bestwert aus
+drei Läufen, das unterdrückt Ausreißer durch konkurrierende Prozesse und
+Cache-Effekte. Die direkte Faltung läuft wegen ihrer deutlich längeren
+Laufzeit pro Konfiguration nur einmal. Bei Messwerten im dreistelligen
+Millisekundenbereich reicht das.
 
 Ausgeführt wurden die Messungen mit CPython~3.14.4, NumPy~2.4.4 und
-SciPy~1.17.1. Die Absolutzeiten sind hardwareabhängig und nicht direkt auf
-andere Systeme übertragbar. Die Aussage des Benchmarks trägt allein das
-Skalierungsverhalten: Die direkte Faltung wächst linear mit der IR-Länge, die
-FFT-Verfahren bleiben nahezu konstant. Dieses Verhältnis folgt aus den
-Aufwandsklassen in Abschnitt~\ref{subsubsec:aufwand} und stellt sich qualitativ
-auf jeder Hardware gleich ein.
+SciPy~1.17.1. Absolutzeiten dieser Art übertragen sich nicht auf andere
+Hardware, darauf kommt es hier aber auch nicht an. Was der Benchmark trägt,
+ist das Skalierungsverhalten, linear gegen nahezu konstant, und dieses
+Verhältnis folgt aus den Aufwandsklassen in
+Abschnitt~\ref{subsubsec:aufwand} auf jeder Maschine gleich.
 
 \subsubsection{Mehrkanalverarbeitung}
 \label{subsubsec:mehrkanal}
