@@ -1,0 +1,85 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{microtype}
+\begin{document}
+
+\section{Projektorganisation und Durchführung}
+\label{sec:projektorganisation}
+Dieses Kapitel beschreibt die organisatorische Durchführung des Projekts:
+die Themenfindung, die Aufteilung der Aufgaben im Team sowie die
+Kommunikationsstruktur während der Projektlaufzeit. Im Gegensatz zu den
+technischen Kapiteln liegt der Fokus hier auf dem Projektverlauf als
+Team, nicht auf einzelnen Implementierungsdetails.
+
+\subsection{Themenfindung}
+\label{sec:themenfindung}
+Zu Beginn des Projekts wurden im Team mehrere mögliche Themen
+vorgeschlagen und in gemeinsamen Meetings diskutiert. Nach Abwägung der vorgeschlagenen 
+Alternativen entschied sich das Team für die Entwicklung eines akustischen Ray-Tracers mit 
+anschließender digitaler Audioverarbeitung, da dieses Thema sowohl eine substantielle theoretische 
+Grundlage (Akustik, Monte-Carlo-Integration,
+digitale Signalverarbeitung) als auch einen nicht-trivialen
+Implementierungsaufwand (parallele Hochleistungsberechnung in Rust,
+Cluster-Verteilung, Audio-Pipeline in Python) vereint.
+
+\subsection{Aufgabenverteilung}
+\label{sec:aufgabenverteilung}
+Die Aufgabenverteilung im Team erfolgte nicht anhand eines im Voraus
+festgelegten Gesamtplans, sondern iterativ und abhängig vom
+Projektfortschritt. Da einzelne Arbeitspakete inhaltlich aufeinander
+aufbauten (z.\,B. konnte die Definition des JSON-Datenschemas erst nach
+Festlegung der von der Physics Engine gelieferten Werte erfolgen, und die
+DSP-Pipeline setzte wiederum ein funktionierendes Datenschema voraus),
+ergaben sich viele konkrete Arbeitspakete erst im Projektverlauf. Zwei
+Teammitglieder erklärten sich früh bereit, sich mit der Rust-Entwicklung
+der Physics Engine auseinanderzusetzen; die übrigen Aufgaben -- Audio-DSP,
+Cluster-Infrastruktur, Geometrie-Import, Visualisierung sowie die
+Dokumentation -- wurden im weiteren Verlauf sukzessive definiert und
+zugeteilt, sobald die jeweiligen Vorgänger-Arbeiten einen ausreichenden
+Stand erreicht hatten.
+
+Beispiele für auf diese Weise entstandene Arbeitspakete sind unter
+anderem:
+\begin{itemize}
+ \item Recherche realistischer Absorptions- und Streukoeffizienten für
+ Materialien sowie Definition des zugehörigen JSON-Schemas,
+ \item Implementierung der Serialisierung der Simulationsergebnisse
+ (\texttt{serde}/\texttt{serde\_json}) in ein einheitliches
+ \texttt{ir\_output.json}-Format,
+ \item Anbindung von Python und Rust über einen Subprocess-Aufruf
+ inklusive JSON-Ingestion,
+ \item Erweiterung der Faltungslogik um frequenzabhängige,
+ materialspezifische Dämpfung,
+ \item Umstellung der Geometrieverarbeitung von 2D auf 3D
+ (Möller--Trumbore-Algorithmus) sowie Anpassung der Visualisierung
+ auf einen echten 3D-Plot,
+ \item Aufbau und Absicherung der Cluster-Infrastruktur zur verteilten
+ Ausführung.
+\end{itemize}
+
+\subsection{Kommunikation}
+\label{sec:kommunikation}
+Die Abstimmung im Team erfolgte über regelmäßige
+Meetings, in denen der Gesamtfortschritt besprochen, offene Fragen
+geklärt und anstehende Arbeitspakete verteilt wurden, sowie ein
+fortlaufender Austausch über einen Discord-Kanal zwischen den Meetings.
+Fertiggestellte Arbeitspakete wurden im Team gegenseitig gesichtet, bevor
+mit darauf aufbauenden Aufgaben begonnen wurde.
+
+\subsection{Herausforderungen im Projektverlauf}
+\label{sec:herausforderungen-orga}
+Eine zentrale organisatorische Herausforderung während der
+Projektlaufzeit war der Ausstieg des ursprünglichen Teammitglieds, der unter
+anderem für den Aufbau der LaTeX-Dokumentation zuständig war. Dessen Aufgaben mussten 
+kurzfristig auf die verbleibenden Teammitglieder umverteilt werden, was zu einer temporären 
+Verzögerung im Projektfortschritt führte. Als Team-Prinzip
+wurde daher etabliert, dass alle Mitglieder bei Bedarf gegenseitig
+einspringen und sich nicht ausschließlich auf das eigene zugewiesene
+Arbeitspaket beschränken. Die Gesamtdokumentation wird
+als gemeinsames Werk des Teams verstanden und nicht nach Autoren
+einzelner Abschnitte kenntlich gemacht, sodass alle Mitglieder gemeinsam
+für Konsistenz, Vollständigkeit und Korrektheit des Gesamtdokuments
+verantwortlich sind.
+
+\end{document}
