@@ -21,7 +21,7 @@ scp node2@139.6.65.18:~/ir_output.json ~/ir_node2.json
 scp node3@139.6.65.16:~/ir_output.json ~/ir_node3.json
 scp node4@139.6.65.25:~/ir_output.json ~/ir_node4.json
 scp node5@139.6.65.23:~/ir_output.json ~/ir_node5.json
-scp node6@139.6.65.24:~/ir_output.json ~/ir_node5.json
+scp node6@139.6.65.24:~/ir_output.json ~/ir_node6.json
 scp node7@139.6.65.26:~/ir_output.json ~/ir_node7.json
 scp node8@139.6.65.28:~/ir_output.json ~/ir_node8.json
 
