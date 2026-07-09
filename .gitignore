@@ -264,3 +264,7 @@ rustc-ice-*.txt
 
 
 rust_service/target/
+/.vs
+/.gitignore
+/.gitignore
+/.gitignore

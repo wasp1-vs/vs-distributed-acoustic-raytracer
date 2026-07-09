@@ -51,6 +51,79 @@ def build_impulse_response(
     return ir
 
 
+def build_binaural_ir(
+    delays_seconds: np.ndarray | list[float],
+    pressures: np.ndarray | list[float],
+    directions: list[list[float]] | np.ndarray,
+    sample_rate: int,
+) -> np.ndarray:
+    """
+    Erzeugt ein Stereo Impulsantwort-Array, das die Richtung der Strahlen berücksichtigt.
+
+    Simple Pan basierend auf Azimut (xy-Ebene) wird verwendet.
+
+    Returns:
+        np.ndarray mit Form (Samples, 2) für Stereo
+    """
+    delays = np.asarray(delays_seconds, dtype=np.float64)
+    pressures = np.asarray(pressures, dtype=np.float64)
+    directions = np.asarray(directions, dtype=np.float64)
+
+    if not (len(delays) == len(pressures) == len(directions)):
+        raise ValueError("delays, pressures und directions müssen gleiche Länge haben")
+
+    indices = np.round(delays * sample_rate).astype(int)
+    ir_length = int(indices.max()) + 1
+
+    ir_left = np.zeros(ir_length)
+    ir_right = np.zeros(ir_length)
+
+    for idx, pressure, direction in zip(indices, pressures, directions):
+        x, y, z = direction
+        azimuth = np.arctan2(y, x)                                # Winkel um Z-Achse
+
+        # Einfaches lineares Pan: -90° links (0), 0° Mitte (0.5), +90° rechts (1)
+        pan = 0.5 * (1 + np.sin(azimuth))
+
+        left_gain = np.cos(pan * np.pi / 2)
+        right_gain = np.sin(pan * np.pi / 2)
+
+        ir_left[idx] += pressure * left_gain
+        ir_right[idx] += pressure * right_gain
+
+    return np.stack([ir_left, ir_right], axis=1)
+
+
+def convolve_binaural(                                           
+    dry_audio: np.ndarray,
+    sample_rate: int,
+    delays_seconds,
+    pressures,
+    directions,
+) -> np.ndarray:
+    """Faltung mit binauralem IR mit Pan basierend auf Richtung."""
+
+    ir = build_binaural_ir(delays_seconds, pressures, directions, sample_rate)
+
+    if dry_audio.ndim == 1:
+        wet_left = signal.oaconvolve(dry_audio, ir[:, 0], mode="full")
+        wet_right = signal.oaconvolve(dry_audio, ir[:, 1], mode="full")
+        wet = np.stack([wet_left, wet_right], axis=1)
+
+    elif dry_audio.ndim == 2:
+        channels = []
+        for c in range(dry_audio.shape[1]):
+            wet_left = signal.oaconvolve(dry_audio[:, c], ir[:, 0], mode="full")
+            wet_right = signal.oaconvolve(dry_audio[:, c], ir[:, 1], mode="full")
+            channels.append(np.stack([wet_left, wet_right], axis=1))
+        wet = np.concatenate(channels, axis=1)
+
+    else:
+        raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+
+    return wet.astype(np.float32)
+
+
 def convolve(
     dry_audio: np.ndarray,
     sample_rate: int,
@@ -82,6 +155,7 @@ def convolve(
         ir_sample_rate = int(meta["sample_rate"])
         delays = hits["delays_seconds"]
         pressures = hits["pressures"]
+        directions = hits.get("directions", None)
     except (KeyError, TypeError) as e:
         raise ValueError(f"ir_data has invalid schema: {e}") from e
 
@@ -90,20 +164,27 @@ def convolve(
             f"sample rate mismatch - audio: {sample_rate} Hz, IR: {ir_sample_rate} Hz"
         )
 
-    ir = build_impulse_response(delays, pressures, sample_rate)
+    if directions is None:
 
-    if dry_audio.ndim == 1:
-        wet = signal.oaconvolve(dry_audio, ir, mode="full")
-    elif dry_audio.ndim == 2:
-        channels = [
-            signal.oaconvolve(dry_audio[:, c], ir, mode="full")
-            for c in range(dry_audio.shape[1])
-        ]
-        wet = np.stack(channels, axis=1)
+        ir = build_impulse_response(delays, pressures, sample_rate)
+
+        if dry_audio.ndim == 1:
+            wet = signal.oaconvolve(dry_audio, ir, mode="full")
+        elif dry_audio.ndim == 2:
+            channels = [
+                signal.oaconvolve(dry_audio[:, c], ir, mode="full")
+                for c in range(dry_audio.shape[1])
+            ]
+            wet = np.stack(channels, axis=1)
+        else:
+            raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+
+        return wet.astype(np.float32)
+
     else:
-        raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+        # Binaural convolution mit Richtungen
+        return convolve_binaural(dry_audio, sample_rate, delays, pressures, directions)
 
-    return wet.astype(np.float32)
 
 
 if __name__ == "__main__":
@@ -118,6 +199,11 @@ if __name__ == "__main__":
         "hits": {
             "delays_seconds": [0.0, 0.05, 0.12],
             "pressures": [1.0, 0.6, 0.3],
+            "directions": [                                       
+                [1, 0, 0],
+                [0, 1, 0],
+                [-1, 0, 0]
+            ],
         },
     }
     duration_s = 1.0

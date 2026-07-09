@@ -5,6 +5,8 @@ from pathlib import Path
 from rust_runner import run_rust_and_load_json
 from wav_handler import read_wav, write_wav
 from convolution import convolve
+from hrtf import HRTFDatabase
+from binaural_convolver import BinauralConvolver
 
 
 def main():
@@ -16,6 +18,7 @@ def main():
     binary_name = "rust_service.exe" if sys.platform == "win32" else "rust_service"
     rust_binary_path = f"../rust_service/target/release/{binary_name}" 
     json_path = "ir_output.json"
+    hrtf_sofa_path = "subject_003.sofa"
 
     input_wav_path = "test_dry_audio.wav"  # You need a dry audio file here!
     output_wav_path = "final_reverb_audio.wav"
@@ -54,7 +57,24 @@ def main():
     # STEP 3: CONVOLUTION (The DSP Math)
     # ---------------------------------------------------------
     print("\n[3/4] Processing convolution (applying room acoustics)...")
-    wet_audio = convolve(dry_audio, sample_rate, ir_data)
+
+    # Erstelle HRTF-Datenbank und binauralen Convolver
+    hrtf_db = HRTFDatabase(hrtf_sofa_path)
+    convolver = BinauralConvolver(hrtf_db, sample_rate)
+
+    delays = ir_data['hits']['delays_seconds']
+    pressures = ir_data['hits']['pressures']
+    directions = ir_data['hits'].get('directions', None)
+
+    if directions is None:
+       
+        wet_audio = convolve(dry_audio, sample_rate, ir_data)
+
+    else:
+        # Sonst binaurale Faltung mit HRTF
+
+        wet_audio = convolver.convolve(dry_audio, delays, pressures, directions)
+
     print("SUCCESS: Convolution finished.")
 
     # ---------------------------------------------------------
