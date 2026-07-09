@@ -1,0 +1,48 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{microtype}
+\begin{document}
+
+\subsection{Kritische Reflexion}
+\label{sec:reflexion}
+
+\subsubsection{Physics Engine (Rust)}
+\label{sec:reflexion-rust}
+% [PLATZHALTER - durch zuständige Teammitglieder zu ergänzen]
+
+\subsubsection{Digitale Signalverarbeitung (Python-DSP-Pipeline)}
+\label{sec:reflexion-dsp}
+% [PLATZHALTER - durch zuständige Teammitglieder zu ergänzen]
+
+\subsubsection{Geometrie und Visualisierung}
+\label{sec:reflexion-geometrie}
+% [PLATZHALTER - durch zuständige Teammitglieder zu ergänzen]
+
+\subsubsection{Cluster-Infrastruktur und Parallelisierung}
+\label{sec:reflexion-cluster}
+Die gewählte Lösung -- statische IP-Adressierung und eine feste,
+manuell erstellte Liste von SSH-Aufrufen in \texttt{run\_cluster.sh} --
+war für die vorliegende Größenordnung von acht Nodes ausreichend und
+pragmatisch umsetzbar, stellt jedoch keinen wartbaren oder skalierbaren
+Ansatz dar. Bei einer größeren Anzahl an Nodes oder bei sich ändernden
+Node-Adressen wäre eine zentrale Konfigurationsdatei die deutlich
+robustere Lösung gewesen. Der erhebliche Zeitaufwand für
+Zugangsdaten-Resets und SSH-Fehlkonfiguration deutet zudem darauf hin,
+dass die Node-Zugänge zu Beginn des Projekts nicht ausreichend
+vorbereitet bzw. dokumentiert waren. Gleichzeitig zeigt sich hier auch
+eine Grenze der klassischen Erfolgsmessung über Codezeilen oder
+Seitenumfang: Ein wesentlicher Teil des Arbeitsaufwands in diesem Bereich
+bestand aus Infrastrukturarbeit, die sich weder im finalen Code noch
+unmittelbar im Umfang der Dokumentation niederschlägt, für das
+Funktionieren der verteilten Ausführung jedoch notwendig war.
+
+\subsubsection{Reflexion als Team}
+\label{sec:reflexion-team}
+Über die fachlichen Bereiche hinaus lässt sich auch der organisatorische
+Ablauf des Projekts kritisch einordnen. Die iterative, erst im
+Projektverlauf entstehende Aufgabenverteilung ermöglichte zwar
+Flexibilität, erschwerte jedoch eine verlässliche Zeitplanung von Beginn
+an.
+
+\end{document}
