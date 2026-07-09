@@ -13,7 +13,27 @@
 
 \subsubsection{Digitale Signalverarbeitung (Python-DSP-Pipeline)}
 \label{sec:reflexion-dsp}
-% [PLATZHALTER - durch zuständige Teammitglieder zu ergänzen]
+Die eigentliche Signalverarbeitung erwies sich als der unkritische Teil der
+Pipeline; die zentrale Herausforderung war organisatorischer Natur. So
+existierten zwei unabhängig entstandene Verfahren für die räumliche Wiedergabe:
+ein einfaches, auf dem Azimut basierendes Panning in \texttt{convolution.py}
+sowie eine vollständige HRTF-Faltung über gemessene SOFA-Datensätze in
+\texttt{binaural\_convolver.py}. Nur der HRTF-Weg war tatsächlich in
+\texttt{main.py} eingebunden; das Panning-Verfahren blieb toter Code. Die
+Konsolidierung auf den HRTF-Pfad beseitigte die Redundanz, verdeutlichte im
+Nachhinein aber, dass paralleles Arbeiten an derselben Schnittstelle ohne frühe
+Absprache zwangsläufig zu Doppelentwicklungen führt.
+
+Eine zweite Lehre betraf die Wahl der Simulationsparameter gegenüber der reinen
+Korrektheit des Codes. Detektorradius (\texttt{mic\_radius}) und Strahlenzahl
+(\texttt{rays\_to\_cast}) sind über die Ausgabegröße gekoppelt: Eine
+überdimensionierte Detektorkugel von $3\,\text{m}$ in einem $10\,\text{m}$-Raum
+registrierte rund elf Treffer pro Strahl und erzeugte bei $10^6$ Strahlen eine
+$1{,}2\,\text{GB}$ große Zwischendatei. Ein physikalisch plausibler Radius von
+$0{,}5\,\text{m}$ liefert bei gleicher Strahlenzahl etwa $3{,}2\cdot10^{5}$
+Treffer und eine $34\,\text{MB}$-Ausgabe. Eine numerisch ``funktionierende''
+Simulation kann somit praktisch unbrauchbar sein; Standardparameter verdienen
+dieselbe kritische Prüfung wie der Code selbst.
 
 \subsubsection{Geometrie und Visualisierung}
 \label{sec:reflexion-geometrie}
