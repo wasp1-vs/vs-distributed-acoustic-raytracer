@@ -6,6 +6,7 @@
 \usepackage{pgfplots}
 \usepackage{booktabs}
 \usetikzlibrary{arrows.meta,positioning}
+\usepackage[ngerman]{babel}
 \begin{document}
 
 \section{Cluster-Infrastruktur und Parallelisierung der Ray-Tracing-Engine}
@@ -27,23 +28,23 @@ Ergebnisdateien nach Abschluss der Simulation ein.
 \begin{figure}[htbp]
  \centering
  \begin{tikzpicture}[
- node distance=0.9cm and 0.9cm,
+ node distance=0.5cm and 0.5cm,
  every node/.style={font=\small},
  manager/.style={rectangle, rounded corners, draw=black, thick,
  fill=blue!10, minimum width=1.5cm, minimum height=1cm, align=center},
  worker/.style={rectangle, rounded corners, draw=black,
- fill=gray!10, minimum width=1.4cm, minimum height=0.85cm, align=center},
+ fill=gray!10, minimum width=0.5cm, minimum height=0.85cm, align=center},
  every edge/.style={draw, -{Latex[length=2mm]}, thin}
  ]
  \node[manager] (mgr) {Manager-Node\\ \texttt{run\_cluster.sh}};
- \node[worker, below left=1.0cm and 4.2cm of mgr] (n1) {Node 1\\ \texttt{rust\_service}};
- \node[worker, right=0.8cm of n1] (n2) {Node 2};
- \node[worker, right=0.8cm of n2] (n3) {Node 3};
- \node[worker, right=0.8cm of n3] (n4) {Node 4};
- \node[worker, right=0.8cm of n4] (n5) {Node 5};
- \node[worker, right=0.8cm of n5] (n6) {Node 6};
- \node[worker, right=0.8cm of n6] (n7) {Node 7};
- \node[worker, right=0.8cm of n7] (n8) {Node 8};
+ \node[worker, below left=1.0cm and 3.2cm of mgr] (n1) {Node 1\\ \texttt{rust\_service}};
+ \node[worker, right=0.3cm of n1] (n2) {Node 2};
+ \node[worker, right=0.3cm of n2] (n3) {Node 3};
+ \node[worker, right=0.3cm of n3] (n4) {Node 4};
+ \node[worker, right=0.3cm of n4] (n5) {Node 5};
+ \node[worker, right=0.3cm of n5] (n6) {Node 6};
+ \node[worker, right=0.3cm of n6] (n7) {Node 7};
+ \node[worker, right=0.3cm of n7] (n8) {Node 8};
  \foreach \n in {n1,n2,n3,n4,n5,n6,n7,n8}{
  \draw[-{Latex[length=1.0mm]}] (mgr.south) -- (\n.north)
  node[midway, sloped, above, font=\tiny] {};
@@ -147,12 +148,14 @@ Millisekunden pro Node (siehe Tabelle~\ref{tab:results}) nur einen
 verschwindend geringen Anteil an der Gesamtlaufzeit aus. Der
 parallelisierbare Anteil $p$ liegt damit sehr nahe an $1$, wodurch nach
 Gleichung~\eqref{eq:amdahl} ein nahezu linearer Speedup zu erwarten ist
--- eine Erwartung, die sich mit dem im Folgenden gemessenen
-Speedup-Faktor von $8{,}0$ bei $n=8$ Nodes deckt (vgl. Abbildung~\ref{fig:speedup}).
+-- eine Erwartung, die sich mit dem in Abschnitt~\ref{sec:finaler-testlauf}
+dokumentierten Testlauf deckt, in dem sich die Rechenzeit pro Node bei
+$n=8$ gegenüber $n=1$ praktisch nicht verändert (vgl.\ Abbildung~\ref{fig:durchsatz}).
 
 \paragraph{Grenzen der Skalierung.}
 Zu beachten ist, dass der serielle Anteil mit wachsender Node-Anzahl nicht
-konstant bleibt: Verbindungsaufbau und Dateiübertragung pro Node
+konstant bleibt: Verbindungsaufbau und Dateiübertragung 
+pro Node
 verursachen einen Kommunikationsoverhead, der mit $n$ wächst
 (bei $n$ Nodes sind $n$ SSH-Verbindungen und $n$ \texttt{scp}-Transfers
 erforderlich). Bei den hier verwendeten $n=8$ Nodes ist dieser Effekt noch
@@ -163,27 +166,82 @@ Idealfall abweicht, da der serielle Anteil $1-p$ effektiv ansteigt. Diese
 Ausblick auf eine dynamische, lastabhängige Verteilung.
 
 \subsection{Ergebnisse}
-Tabelle~\ref{tab:results} und Abbildung~\ref{fig:speedup} fassen die
-erzielte Skalierung zusammen.
+\label{sec:ergebnisse}
+\label{sec:finaler-testlauf}
+Der initiale Testlauf mit einer stark reduzierten Ray-Anzahl
+(\texttt{rays\_to\_cast = 1}) diente lediglich zur Verifikation der
+grundsätzlichen Funktionsfähigkeit der Pipeline. Für einen
+aussagekräftigen Vergleich der Ausführung auf einem einzelnen Node
+gegenüber der verteilten Ausführung auf acht Nodes wurde daher ein
+weiterer Testlauf mit einer produktionsnahen Konfiguration
+(\texttt{rays\_to\_cast = 100000}, \texttt{mic\_radius = 0.5}) auf dem
+Branch \texttt{3d-audio-cluster} durchgeführt.
+
+Bei der Auswertung ist zwischen zwei unterschiedlichen Zeitmessungen zu
+unterscheiden: der \emph{Wandzeit} (\texttt{real}-Zeit des
+Unix-Kommandos \texttt{time}), die neben der reinen
+Simulationsberechnung auch den SSH-Verbindungsaufbau sowie den
+abschließenden Rücktransfer der acht Ergebnisdateien per \texttt{scp}
+einschließt, und der von der Rust-Engine selbst intern gemessenen
+\emph{Simulationslaufzeit} (\texttt{Simulation run time}), welche
+ausschließlich die reine Berechnungszeit ohne Kommunikations-Overhead
+widerspiegelt.
+
+Tabelle~\ref{tab:finaler-testlauf} stellt die gemessenen Werte für die
+Ausführung auf einem einzelnen Node ($n=1$) der Ausführung auf acht
+Nodes ($n=8$) gegenüber.
 
 \begin{table}[htbp]
  \centering
- \caption{Simulationsergebnisse der Cluster-Ausführung}
- \label{tab:results}
- \begin{tabular}{lr}
+ \caption{Vergleich Einzel-Node- vs. Acht-Node-Ausführung bei
+ \texttt{rays\_to\_cast = 100000} pro Node}
+ 
+ \label{tab:finaler-testlauf}
+ \begin{tabular}{lrr}
  \toprule
- Metrik & Wert \\
+ Metrik & $n=1$ & $n=8$ \\
  \midrule
- Anzahl Worker-Nodes & 8 \\
- Rays pro Node & 1.000.000 \\
- Rays gesamt & 8.000.000 \\
- Laufzeit pro Node & 0{,}039\,s \\
- Gültige Ray-Hits (Merge) & 993.201 \\
- Trefferquote & 12{,}4\,\% \\
- Speedup-Faktor (relativ zu 1 Node) & 8{,}0 (linear) \\
+ Rays pro Node & 100.000 & 100.000 \\
+ Rays gesamt & 100.000 & 800.000 \\
+ Simulationslaufzeit pro Node (intern) & 0{,}044\,s & 0{,}033--0{,}044\,s \\
+ Wandzeit (\texttt{real}, gesamter Lauf) & 1{,}275\,s & 3{,}813\,s \\
+ Ray-Hits gesamt (Merge) & 141.115 & 1.133.347 \\
  \bottomrule
  \end{tabular}
 \end{table}
+
+Die reine, intern gemessene Simulationslaufzeit liegt sowohl beim
+Einzel-Node- als auch bei jedem der acht parallel laufenden Nodes im
+selben engen Bereich von rund $0{,}033$ bis $0{,}044\,$s -- unabhängig
+davon, ob ein Node isoliert oder gemeinsam mit sieben weiteren Nodes
+gleichzeitig rechnet. Die insgesamt verarbeitete Ray-Anzahl steigt bei
+gleichbleibender Rechenzeit pro Node hingegen linear mit der Anzahl der
+Nodes: Bei $n=8$ werden in etwa derselben Zeitspanne, die ein einzelner
+Node für $100.000$ Rays benötigt, insgesamt $800.000$ Rays verarbeitet.
+
+Demgegenüber steigt die gemessene Wandzeit des Gesamtlaufs
+(\texttt{real}) von $1{,}275\,$s bei $n=1$ auf $3{,}813\,$s bei $n=8$ an.
+Dieser Anstieg ist nicht auf die Simulationsberechnung selbst
+zurückzuführen, sondern resultiert vollständig aus dem seriellen, nicht
+parallelisierten Anteil des Ablaufs: dem Aufbau von acht
+SSH-Verbindungen sowie insbesondere dem sequenziellen Rücktransfer der
+acht ca.\ $4\,$MB großen \texttt{ir\_output.json}-Dateien per
+\texttt{scp} nach Abschluss der Berechnung. Genau dieser Anteil
+entspricht dem seriellen Restanteil $1-p$ aus
+Gleichung~\eqref{eq:amdahl} in Abschnitt~\ref{sec:amdahl} und bestätigt
+empirisch die dort formulierte Erwartung, dass der
+Kommunikations-Overhead mit wachsender Node-Anzahl $n$ zunimmt.
+
+Der vorliegende Testlauf zeigt damit kein klassisches
+Latenz-Speedup im Sinne von $S(n) = T(1)/T(n)$ mit gleichbleibender
+Gesamt-Ray-Anzahl -- ein solcher Vergleich wäre hier irreführend, da bei
+$n=1$ und $n=8$ unterschiedliche Gesamt-Ray-Mengen berechnet wurden.
+Stattdessen zeigt sich eine \emph{Durchsatzskalierung}
+(Abbildung~\ref{fig:durchsatz}): Bei nahezu konstanter Rechenzeit pro
+Node lässt sich die Gesamtzahl der verarbeiteten Rays proportional zur
+Anzahl der eingesetzten Nodes steigern -- die für ein \emph{embarrassingly
+parallel} Problem (vgl.\ Abschnitt~\ref{sec:amdahl}) zu erwartende
+Charakteristik.
 
 \begin{figure}[htbp]
  \centering
@@ -191,31 +249,37 @@ erzielte Skalierung zusammen.
  \begin{axis}[
  width=0.72\textwidth,
  height=6.5cm,
+ ybar,
+ bar width=25pt,
+ symbolic x coords={n=1, n=8},
+ xtick=data,
  xlabel={Anzahl Nodes},
- ylabel={Speedup (relativ)},
- xtick={1,2,4,8},
- ymin=0, ymax=9,
+ ylabel={Verarbeitete Rays gesamt},
+ ymin=0,
  grid=major,
  grid style={dashed, gray!30},
+ nodes near coords,
+ nodes near coords align={vertical},
+ every node near coord/.append style={font=\small},
  legend pos=north west,
  legend style={font=\small}
  ]
- \addplot[mark=*, thick, color=blue] coordinates {
- (1,1) (2,2) (4,4) (8,8)
+ \addplot[fill=blue!40, draw=blue] coordinates {
+ (n=1,100000) (n=8,800000)
  };
- \addlegendentry{Gemessener Speedup}
- \addplot[dashed, thick, color=gray] coordinates {
- (1,1) (8,8)
- };
- \addlegendentry{Ideal (linear)}
+ \addlegendentry{Rays gesamt (100.000 pro Node)}
  \end{axis}
  \end{tikzpicture}
- \caption{Gemessener Speedup der verteilten Ray-Tracing-Berechnung im
- Vergleich zur idealen linearen Skalierung. Bei acht Nodes wurde ein
- Speedup-Faktor von 8{,}0 erreicht, was auf eine near-lineare
- Skalierbarkeit der Monte-Carlo-Ray-Generierung ohne signifikanten
- Kommunikations-Overhead hindeutet.}
- \label{fig:speedup}
+ \caption{Durchsatzskalierung der verteilten Ray-Tracing-Berechnung: Bei
+ nahezu konstanter Simulationslaufzeit pro Node
+ ($0{,}033$--$0{,}044\,$s, vgl.\ Tabelle~\ref{tab:finaler-testlauf})
+ steigt die insgesamt verarbeitete Ray-Anzahl proportional zur Anzahl
+ der eingesetzten Nodes von $100.000$ ($n=1$) auf $800.000$ ($n=8$).
+ Im Gegensatz zu einem klassischen Latenz-Speedup-Diagramm zeigt diese
+ Darstellung die für ein \emph{embarrassingly parallel} Problem
+ charakteristische lineare Durchsatzsteigerung bei konstanter
+ Rechenzeit.}
+ \label{fig:durchsatz}
 \end{figure}
 
 \subsection{Herausforderungen und Lösungen}
