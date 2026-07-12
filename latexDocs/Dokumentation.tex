@@ -1,11 +1,150 @@
 \documentclass{article}
 
 \usepackage{amsmath}
-
 \usepackage{listings}
+\usepackage{amssymb}
 
 
 \begin{document}
+
+
+    \section{Theoretische Grundlagen}
+    \label{sec:grundlagen}
+
+    Dieses Kapitel legt die mathematischen und physikalischen Grundlagen dar,
+    auf denen die Simulationspipeline aufbaut.
+    Das Verständnis dieser Konzepte ist Voraussetzung für die Bewertung der
+    in späteren Kapiteln beschriebenen Implementierungsentscheidungen.
+
+    \subsection{Akustische Grundlagen}
+    \label{subsec:akustik}
+
+    \paragraph{Das Inverse Quadratgesetz}
+
+    Im freien, reflexionsfreien Schallfeld breitet sich Schall kugelförmig vom Emitter aus.
+    Da die abgestrahlte Schallleistung $P$ über eine mit $r^2$ wachsende Kugeloberfläche
+    $A = 4\pi r^2$ verteilt wird, nimmt die Schallintensität $I$ mit dem Quadrat der Entfernung ab:
+    \[I(r) = \frac{P}{4\pi r^2}\]
+    Da die Schallintensität proportional zum Quadrat des Schalldrucks ist ($I \propto p^2$),
+    folgt für den Schalldruck:
+    \[p(r) \propto \frac{1}{r}\]
+    Eine Verdopplung des Abstands zur Quelle halbiert den Schalldruck, was einer
+    Pegelminderung von $6\,\text{dB}$ entspricht.
+    In der Simulation wird dieser geometrische Energieverlust implizit berücksichtigt:
+    Strahlen, die einen längeren Weg zur Mikrofonkapsel zurücklegen, treffen mit einem
+    entsprechend geringeren Druckbeitrag ein.
+
+    \paragraph{Materialabsorption}
+
+    Trifft ein Schallstrahl auf eine Raumgrenze, wird ein Teil der Schallenergie absorbiert.
+    Dieser Vorgang wird durch den dimensionslosen Absorptionskoeffizienten $\alpha \in [0{,}1]$
+    beschrieben. Der Restdruck nach einer einzelnen Reflexion berechnet sich zu:
+    \[p_{\text{ref}} = p_{\text{ein}} \cdot (1 - \alpha)\]
+    Bei einer Sequenz von $n$ Reflexionen mit den jeweiligen Koeffizienten
+    $\alpha_1, \ldots, \alpha_n$ gilt:
+    \[p_n = p_0 \cdot \prod_{k=1}^{n}(1 - \alpha_k)\]
+    Ein vollständig absorbierendes Material ($\alpha = 1{,}0$) vernichtet den Strahl bei der
+    ersten Reflexion, während ein perfekt reflektierendes Material ($\alpha = 0{,}0$) keine
+    Energie entzieht. Die Simulation terminiert Strahlen, sobald ihr verbleibender Druckwert
+    den konfigurierbaren Grenzwert \texttt{min\_pressure} unterschreitet.
+
+    \paragraph{Frühe Reflexionen und späte Nachhallzeit}
+
+    Die akustische Impulsantwort eines Raumes lässt sich zeitlich in zwei charakteristische
+    Phasen unterteilen.
+    Innerhalb der ersten ca. $80\,\text{ms}$ nach dem Direktschall treffen die
+    \emph{frühen Reflexionen} (Early Reflections) ein: diskrete, noch einzeln wahrnehmbare
+    Echos über klar definierte, kurze Ausbreitungspfade, die das Raumgefühl und die
+    Tiefenwahrnehmung maßgeblich prägen.
+    Mit zunehmender Zeit überlagern sich Reflexionen höherer Ordnung zu einem dichten,
+    statistisch gleichverteilten Nachhallfeld. Diese \emph{späte Nachhallzeit}
+    (Late Reverberation) klingt exponentiell ab und wird durch die Nachhallzeit $RT_{60}$
+    charakterisiert -- der Zeitraum, in dem der Schalldruckpegel um $60\,\text{dB}$ abfällt.
+    Das stochastische Raytracing erfasst beide Phasen natürlich, da sowohl kurze Direktpfade
+    als auch komplexe Mehrfachreflexionen in der Impulsantwort akkumuliert werden.
+
+
+    \subsection{Monte-Carlo-Integration und Raytracing}
+    \label{subsec:montecarlo}
+
+    \paragraph{Das akustische Integrationsproblem}
+
+    Der Schalldruck am Empfänger ist das Integral über alle möglichen Schallpfade vom Emitter,
+    gewichtet nach Weglänge und materialabhängigen Verlusten. Da die Anzahl dieser Pfade durch
+    Mehrfachreflexionen kombinatorisch explodiert, ist eine analytische Auswertung für
+    beliebige Raumgeometrien nicht praktikabel. Deterministisches Ray Tracing kann zwar exakte
+    Pfade verfolgen, skaliert jedoch exponentiell mit der Anzahl der Reflexionen.
+
+    \paragraph{Der Monte-Carlo-Ansatz}
+
+    Die Monte-Carlo-Integration umgeht dieses Problem durch stochastische Stichprobennahme.
+    Statt alle Pfade zu berechnen, schätzt man den Erwartungswert eines Integrals durch den
+    arithmetischen Mittelwert von $N$ zufällig gezogenen Stichproben:
+    \[\mathbb{E}[f(X)] \approx \frac{1}{N} \sum_{i=1}^{N} f(x_i)\]
+    Nach dem Gesetz der großen Zahlen konvergiert dieser Schätzer für $N \to \infty$ gegen
+    den wahren Integralwert. Der statistische Fehler nimmt dabei mit $\frac{1}{\sqrt{N}}$ ab:
+    ein viermal so großes Stichprobenvolumen halbiert den Fehler.
+
+    \paragraph{Anwendung: Stochastisches Raytracing}
+
+    In der Simulation entspricht eine Stichprobe einem Schallstrahl, der in einer zufälligen
+    Richtung $\theta \in [0, 2\pi)$ vom Emitter ausgesendet wird:
+    \[\vec{D} = (\cos\theta,\; \sin\theta), \quad \theta \sim \mathcal{U}(0,\; 2\pi)\]
+    Jeder Strahl verfolgt seinen Ausbreitungspfad, reflektiert an Wänden und registriert
+    einen Treffer, sobald er die Mikrofonkapsel schneidet. Der akkumulierte Beitrag dieses
+    Treffers -- Laufzeit $\tau$ und Restdruck $p$ -- repräsentiert eine Stichprobe des
+    akustischen Integrals. Über $N = 10^6$ bis $10^8$ Strahlen konvergiert die Gesamtheit
+    der Treffer zur vollständigen Impulsantwort des Raumes.
+    Der wesentliche Vorteil gegenüber deterministischen Verfahren liegt in der trivialen
+    Parallelisierbarkeit: Da jeder Strahl unabhängig von allen anderen ist, lassen sich die
+    $N$ Stichproben direkt auf beliebig viele CPU-Kerne aufteilen
+    (siehe Kapitel~\ref{sec:concurrency}).
+
+
+    \subsection{Digitale Signalverarbeitung: Impulsantwort und schnelle Faltung}
+    \label{subsec:dsp}
+
+    \paragraph{Die Impulsantwort (IR)}
+
+    Ein lineares, zeitinvariantes System -- wie ein Raum aus akustischer Perspektive -- ist
+    vollständig durch seine \emph{Impulsantwort} $h(t)$ charakterisiert: die Ausgabe des
+    Systems bei einem idealen Dirac-Impuls $\delta(t)$ am Eingang.
+    Die von der Rust-Engine berechnete Menge an (Laufzeit, Druck)-Paaren
+    $\{(\tau_i, p_i)\}_{i=1}^{M}$ stellt eine diskrete Approximation dieser Impulsantwort dar:
+    \[h(t) \approx \sum_{i=1}^{M} p_i \cdot \delta(t - \tau_i)\]
+    Das Python-Modul \texttt{convolution.py} diskretisiert diese Darstellung in ein
+    sample-genaues Array, indem jede Verzögerung $\tau_i$ in den Sample-Index
+    $n_i = \lfloor \tau_i \cdot f_s \rceil$ umgerechnet und Druckwerte akkumuliert werden
+    (bei $f_s = 44100\,\text{Hz}$).
+
+    \paragraph{Das Faltungsintegral}
+
+    Das Ausgangssignal $y(t)$ -- das hallbehaftete Audio -- ergibt sich aus der linearen
+    Faltung des Eingangssignals $x(t)$ mit der Impulsantwort $h(t)$:
+    \[y(t) = (x * h)(t) = \int_{-\infty}^{\infty} x(\tau)\, h(t - \tau)\, d\tau\]
+    In der diskreten Signalverarbeitung wird dieses Integral zur Summe:
+    \[y[n] = \sum_{k=0}^{M-1} h[k] \cdot x[n - k]\]
+    Die direkte Auswertung hat eine Rechenkomplexität von $\mathcal{O}(N \cdot M)$, wobei $N$
+    die Länge des Audiosignals und $M$ die Länge der Impulsantwort bezeichnet.
+    Bei realen Impulsantworten mit $M$ von mehreren hunderttausend Samples ist eine direkte
+    Berechnung unpraktikabel.
+
+    \paragraph{Schnelle Faltung via FFT (Overlap-Add)}
+
+    Das \emph{Faltungstheorem} der Fouriertransformation besagt, dass eine Faltung im
+    Zeitbereich einem punktweisen Produkt im Frequenzbereich entspricht:
+    \[Y(f) = \mathcal{F}\{x\}(f) \cdot \mathcal{F}\{h\}(f)
+      \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
+    Durch den Einsatz der Fast Fourier Transform (FFT) sinkt die Komplexität auf
+    $\mathcal{O}((N+M)\log(N+M))$, was bei großen $M$ einen massiven Speedup bedeutet.
+
+    Da das Audiosignal wesentlich länger sein kann als eine einzelne FFT erlaubt,
+    wird das \emph{Overlap-Add}-Verfahren eingesetzt: Das Signal $x[n]$ wird in
+    überlappungsfreie Blöcke der Länge $L$ aufgeteilt, jeder Block wird separat mit $h[n]$
+    gefaltet, und die resultierenden Ausgabeblöcke -- je $L + M - 1$ Samples lang -- werden
+    additiv überlagert. Die Implementierung nutzt hierfür
+    \texttt{scipy.signal.oaconvolve}, welche diesen Algorithmus effizient realisiert und
+    sowohl mono- als auch mehrkanalige Signale verarbeitet.
 
 
     \section{Physikalischer Kern: 2D-Strahlensegmentschnitt}

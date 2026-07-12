@@ -12,7 +12,9 @@ def main():
 
     # 1. Define the input/output paths
     # (Adjust these paths depending on where your test audio is located)
-    rust_binary_path = "../rust_service/target/release/rust_service.exe"  # Use .exe for Windows, just rust_service for Mac/Linux
+    # Betriebssystem prüfen und .exe nur unter Windows anhängen
+    binary_name = "rust_service.exe" if sys.platform == "win32" else "rust_service"
+    rust_binary_path = f"../rust_service/target/release/{binary_name}" 
     json_path = "ir_output.json"
 
     input_wav_path = "test_dry_audio.wav"  # You need a dry audio file here!
