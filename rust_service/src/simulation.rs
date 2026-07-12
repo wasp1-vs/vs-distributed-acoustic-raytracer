@@ -197,7 +197,7 @@ pub fn simulate_single_ray_visualisation(
     for _bounce in 0..config.max_bounces {
         if let Some((bounced_ray, absorption)) = cast_ray(&current_ray, triangles) {
             path_buffer.push(bounced_ray.origin);
-            current_pressure *= 1.0 - absorption;
+            current_pressure *= (1.0 - absorption).sqrt();
             if current_pressure < config.min_pressure {
                 break;
             }
