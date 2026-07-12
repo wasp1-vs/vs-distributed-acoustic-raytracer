@@ -1,0 +1,69 @@
+\documentclass{article}
+
+
+% --- PAKETE ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{booktabs}
+\usetikzlibrary{arrows.meta,positioning}
+\pgfplotsset{compat=1.18}
+
+% --- CODE LISTINGS CONFIG ---
+\lstset{
+    breaklines=true,
+    breakatwhitespace=true,
+    basicstyle=\ttfamily\small
+}
+
+\lstdefinelanguage{Rust}{
+    keywords={fn, let, mut, match, return, if, else, for, while, loop, impl, struct, enum, pub, use, trait, type, crate, mod, as, break, continue, move, ref, where},
+    keywordstyle=\color{blue}\bfseries,
+    ndkeywords={bool, u8, u16, u32, u64, f32, f64, i8, i16, i32, i64, usize, isize, String, Vec, Option, Result, Self},
+    ndkeywordstyle=\color{purple}\bfseries,
+    sensitive=true,
+    comment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\color{gray}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    morestring=[b]",
+    morestring=[b]'
+}
+
+\begin{document}
+
+    \include{kapitel1/kapitel1}
+% ==========================================
+% KAPITEL 2: THEORETISCHE GRUNDLAGEN
+% ==========================================
+    \include{kapitel2/kapitel2}
+% ==========================================
+% KAPITEL 3: ORGA UND ARCHITEKTUR
+% ==========================================
+    \include{kapitel3/kapitel3}
+% ==========================================
+% KAPITEL 4: IMPLEMENTIERUNG & PHYSIKALISCHER KERN
+% ==========================================
+    \include{kapitel4/kapitel4}
+
+% ==========================================
+% KAPITEL 5: EVALUATION UND VALIDIERUNG
+% ==========================================
+
+
+
+
+    \include{kapitel5/kapitel5}
+
+
+% ==========================================
+% KAPITEL 6: REFLEXION & FAZIT
+% ==========================================
+    \include{kapitel6/kapitel6}
+\end{document}

@@ -1,0 +1,112 @@
+
+% ==========================================
+% KAPITEL 4: IMPLEMENTIERUNG & PHYSIKALISCHER KERN
+% ==========================================
+\section{Physikalischer Kern und Implementierung}
+\label{sec:implementierung}
+
+Der rechnerische Kern der Physik-Engine basiert auf robuster linearer Algebra, um Randkollisionen zu lösen. Um den Rechendurchsatz bei Millionen von Strahlen zu maximieren, verzichtet die Engine auf rechnerisch aufwändige trigonometrische Funktionen zugunsten reiner Vektormathematik.
+
+\subsection{2D-Strahlensegmentschnitt}
+\label{subsec:2d_schnitt}
+
+\paragraph{Geometrische Definitionen}
+Ein Schallstrahl wird durch einen Ursprungspunkt $O$ und einen normalisierten Richtungsvektor definiert $\vec{D}$. Jeder Punkt $P$ entlang der Strahlenbahn kann als Funktion der skalaren Distanz $t$ berechnet werden: $P(t) = O + t\vec{D}$.
+Eine Wand wird als Liniensegment dargestellt, definiert durch zwei Endpunkte $A$ und $B$. Mit dem Wandvektor $\vec{V} = B - A$ ergibt sich die parametrische Gleichung: $W(u) = A + u\vec{V}$.
+
+\paragraph{Schnittpunktberechnung und Validierung}
+Durch das Gleichsetzen der Gleichungen und die Definition der Schnittdeterminante als $\det = \vec{D} \times \vec{V}$ können die Parameter $t$ und $u$ isoliert algebraisch gelöst werden.
+Eine physikalische Kollision wird validiert, wenn die Determinante nicht verschwindend gering ist (Ausschluss von Parallelität), die Distanz $t \ge 0$ ist (Ausschluss von Rückwärtstreffern) und der Parameter $0 \le u \le 1$ liegt (Einschränkung auf das Liniensegment).
+
+\paragraph{Vektorreflexion}
+Die Richtung des reflektierten Strahls $\vec{R}$ wird bestimmt, indem von der Richtung des einfallenden Strahls $\vec{D}$ das Doppelte der Projektion dieser Richtung auf die Oberflächennormale $\vec{N}$ subtrahiert wird:
+\[\vec{R} = \vec{D} - 2(\vec{D} \cdot \vec{N})\vec{N}\]
+Innerhalb der Rust-Codebasis wird diese Berechnung durch die \texttt{reflect} Methode des \texttt{glam}-Crates optimiert, die SIMD-Instruktionen für minimalen Overhead nutzt.
+
+\subsection{Hochleistungs-Nebenläufigkeit und Datenparallelität}
+\label{subsec:concurrency}
+
+Ein wesentlicher Vorteil von Rust im High-Performance-Computing sind seine strengen Garantien zur Kompilierzeit gegen Data-Races. Die Verteilung einer iterativen Physikschleife auf Multi-Core-Architekturen erfordert oft komplexe Thread-Sperrlogiken. In dieser Engine wird dieser Overhead vermieden durch ein funktionales, datenparalleles Paradigma unter Verwendung des \texttt{rayon}-Crates.
+
+\paragraph{Von Shared Mutation zu thread-lokalem-Folding}
+Bei einer Single-Thread-Ausführung hängen Iterationen die Ergebnisse an ein gemeinsames dynamisches Array an. Diese Schleife auf zahlreiche Threads aufzuteilen, würde zu gleichzeitigen Schreibversuchen auf dieselben Speicheradressen führen. Anstatt Locks zu verwenden, nutzt die Architektur das Trait \texttt{into\_par\_iter()} von \texttt{rayon} in Kombination mit einer \texttt{fold}- und \texttt{reduce}-Pipeline.
+
+Jeder Thread simuliert unabhängig seine Teilmenge an Strahlen und hängt die Ergebnisse sequenziell in seinen eigenen lokalen Speicherbereich an. Sobald ein Thread seine Arbeitslast abgeschlossen hat, wird die \texttt{reduce}-Phase aktiviert, welche diese isolierten Puffer sicher zu den endgültigen Arrays zusammenführt.
+
+\begin{lstlisting}[language=Rust]
+use rayon::prelude::*;
+
+fn run_simulation_parallel(
+config: &SimulationConfig, walls: &Vec<Wall>
+) -> (Vec<f32>, Vec<f32>) {
+    let(delays_par, pressures_par, _) = (0..config.rays_to_cast)
+        .into_par_iter()
+        // 1. Falten, lokaler Puffer
+        .fold( || {
+            let local_delays = Vec::with_capacity(CAP);
+            let local_pressures = Vec::with_capacity(CAP);
+            let temp_ray = Vec::with_capacity(CAP);
+            (local_delays, local_pressures, temp_ray)
+        },
+        // ... (Simulation Logik)
+        // 2. Reduzieren, Global Merge
+        ).reduce(
+        || (Vec::new(), Vec::new(), Vec::new()),
+        |mut a, mut b| {
+            a.0.append(&mut b.0);
+            a.1.append(&mut b.1);
+            a
+        }
+    );
+    (delays_par, pressures_par)
+}
+\end{lstlisting}
+
+\subsection{Visualisierung und diagnostisches Tooling}
+\label{subsec:visualizer}
+
+Da die Berechnung von Millionen stochastischer Strahlengänge in einem rein textbasierten Output nur schwer auf algorithmische Korrektheit überprüfbar ist, wurde eine Pipeline für visuelles Debugging entwickelt. Hierfür exportiert die Rust-Engine eine Teilmenge der Segmente in eine JSON-Datei (\texttt{visualisation\_data.json}).
+
+\paragraph{Phase 1: Statische 2D-Visualisierung}
+In der initialen Phase wurde ein Python-Skript basierend auf \texttt{matplotlib} eingesetzt. Dieses Werkzeug parste die Daten und stellte sie in einem kartesischen 2D-Koordinatensystem grafisch dar. Es war maßgeblich für die Identifikation tiefliegender mathematischer Anomalien.
+
+\paragraph{Phase 2: Interaktive 3D-Volumenvisualisierung}
+Mit der Erweiterung auf eine vollständige 3D-Raumgeometrie stieß eine planare Projektion an ihre analytischen Grenzen. Daher wurde das Tooling um einen interaktiven 3D-Visualizer auf Basis der Bibliothek \texttt{plotly} erweitert.
+Dieses Diagnosewerkzeug generiert einen Raum, in dem die Mikrofonkapsel als volumetrisches Kugel-Mesh (\texttt{go.Surface}) gerendert wird. Zur Unterscheidbarkeit einzelner Strahlengänge implementiert das Skript eine farbliche Differenzierung auf Basis des Goldenen Winkels ($137{,}5^\circ$ Farbton-Verschiebung im HSL-Farbraum).
+
+\begin{lstlisting}[language=Python]
+ray_colour = f'hsl({(i*137.5)%360},80%,60%)'
+\end{lstlisting}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{kapitel4/3dplot3}
+  \caption{Ein Strahl im interaktiven 3D Visualizer.}
+  \label{fig:3dplot3}
+\end{figure}
+
+\subsection{Behandlung von Fließkomma-Ungenauigkeiten (Self-Intersection)}
+\label{subsec:epsilon_fix}
+
+Die Auswertung der Strahlengänge durch den Visualizer offenbarte ein kritisches algorithmisches Problem: Strahlen wurden unregelmäßig terminiert. Die Ursache hierfür lag in der Fließkomma-Ungenauigkeit der CPU.
+Wenn ein Strahlengang an einer Wand reflektiert wird, dient dieser mathematische Schnittpunkt als Ursprung für den nachfolgenden Reflexionsstrahl. In der nächsten Iteration prüft die Engine den neuen Strahl gegen alle Wände -- inklusive der Wand, auf der er sich bereits befindet. Aufgrund von Rundungsfehlern berechnet der Algorithmus die Distanz zur aktuellen Wand nicht als $0{,}0$, sondern beispielsweise als $-0{,}0000001$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{kapitel4/shadowacne1}
+  \caption{2D-Visualizer: Strahl reflektiert aufgrund von Rundungsfehlern auf derselben Wand.}
+  \label{fig:shadowacne1}
+\end{figure}
+
+Die ursprüngliche Abbruchbedingung lautete: \texttt{if ray\_t < 0.0 \{ return None; \}}. Da mikroskopisch negative Fließkomma-Werte oft verschluckt oder fehlerhaft evaluiert wurden, registrierte die Engine fälschlicherweise sofortige, valide Treffer auf derselben Wand. Der Strahl ,,reflektierte`` in einer Endlosschleife am selben Punkt, bis das \texttt{max\_bounces}-Limit erschöpft war. In der Computergrafik ist dieses Phänomen als \emph{Shadow Acne} bekannt.
+
+Zur Lösung dieses Problems wurde ein Epsilon-Wert ($\epsilon$) eingeführt. Die Bedingung wurde zu \texttt{if ray\_t < 0.001 \{ return None; \}} modifiziert. Ein berechneter Schnittpunkt wird folglich nur als valide betrachtet, wenn der Strahl eine Mindestdistanz von $1\,\text{mm}$ zurückgelegt hat. Die erneute Visualisierung bestätigte, dass das physikalische Verhalten nun korrekt simuliert wurde.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.8\textwidth]{kapitel4/fixedshadowacne}
+  \caption{2D-Visualizer mit implementiertem Epsilon-Fix.}
+  \label{fig:shadowacne2}
+\end{figure}
+
+

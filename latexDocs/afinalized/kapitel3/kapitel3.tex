@@ -1,0 +1,65 @@
+
+% ==========================================
+% KAPITEL 3: ORGA UND ARCHITEKTUR
+% ==========================================
+\section{Projektorganisation und Systemarchitektur}
+\label{sec:orga_und_architektur}
+
+Dieses Kapitel beschreibt die organisatorische Durchführung des Projekts sowie die Konzeption der zugrundeliegenden Cluster-Topologie zur Lastenverteilung.
+
+\subsection{Projektorganisation und Durchführung}
+\label{subsec:projektorganisation}
+
+\paragraph{Themenfindung}
+Zu Beginn des Projekts wurden im Team mehrere mögliche Themen vorgeschlagen und in gemeinsamen Meetings diskutiert. Nach Abwägung der Alternativen entschied sich das Team für die Entwicklung eines akustischen Ray-Tracers mit anschließender digitaler Audioverarbeitung, da dieses Thema sowohl eine substantielle theoretische Grundlage als auch einen nicht-trivialen Implementierungsaufwand (parallele Hochleistungsberechnung in Rust, Cluster-Verteilung, Audio-Pipeline in Python) vereint.
+
+\paragraph{Aufgabenverteilung}
+Die Aufgabenverteilung im Team erfolgte nicht anhand eines im Voraus festgelegten Gesamtplans, sondern iterativ und abhängig vom Projektfortschritt. Da einzelne Arbeitspakete inhaltlich aufeinander aufbauten (z.\,B. konnte die DSP-Pipeline erst nach Festlegung des JSON-Datenschemas implementiert werden), ergaben sich viele konkrete Arbeitspakete erst im Projektverlauf. Einzelne Teammitglieder übernahmen die Federführung für die Rust-Entwicklung, die Audio-DSP, die Cluster-Infrastruktur sowie die Visualisierungstools.
+
+\paragraph{Kommunikation und Herausforderungen}
+Die Abstimmung im Team erfolgte über regelmäßige Meetings sowie einen fortlaufenden Austausch über einen internen Kommunikationskanal. Eine zentrale organisatorische Herausforderung während der Projektlaufzeit war der unvorhergesehene Ausstieg des ursprünglichen Teammitglieds, das unter anderem für die redaktionelle Dokumentation zuständig war. Dessen Aufgaben mussten kurzfristig umverteilt werden, was zu einer temporären Verzögerung führte. Es wurde das Prinzip etabliert, dass alle Mitglieder bei Bedarf abteilungsübergreifend einspringen, um die Konsistenz des Gesamtprojekts zu gewährleisten.
+
+\subsection{Cluster-Infrastruktur und Parallelisierung}
+\label{subsec:cluster_architektur}
+
+Im Rahmen des Projekts bestand die Aufgabe darin, die Rust-basierte Physics Engine auf einem Cluster aus acht Worker-Nodes parallel auszuführen und die Teilergebnisse zu einer konsistenten Impulsantwort (IR) zusammenzuführen.
+
+\paragraph{Architektur}
+Abbildung~\ref{fig:cluster-arch} zeigt die eingesetzte Manager-Worker-Topologie. Der Manager-Node orchestriert die Ausführung über SSH und sammelt die Ergebnisdateien nach Abschluss der Simulation ein.
+
+\begin{figure}[htbp]
+ \centering
+ \begin{tikzpicture}[
+ node distance=0.5cm and 0.5cm,
+ every node/.style={font=\small},
+ manager/.style={rectangle, rounded corners, draw=black, thick,
+ fill=blue!10, minimum width=1.5cm, minimum height=1cm, align=center},
+ worker/.style={rectangle, rounded corners, draw=black,
+ fill=gray!10, minimum width=0.5cm, minimum height=0.85cm, align=center},
+ every edge/.style={draw, -{Latex[length=2mm]}, thin}
+ ]
+ \node[manager] (mgr) {Manager-Node\\ \texttt{run\_cluster.sh}};
+ \node[worker, below left=1.0cm and 3.2cm of mgr] (n1) {Node 1\\ \texttt{rust\_service}};
+ \node[worker, right=0.3cm of n1] (n2) {Node 2};
+ \node[worker, right=0.3cm of n2] (n3) {Node 3};
+ \node[worker, right=0.3cm of n3] (n4) {Node 4};
+ \node[worker, right=0.3cm of n4] (n5) {Node 5};
+ \node[worker, right=0.3cm of n5] (n6) {Node 6};
+ \node[worker, right=0.3cm of n6] (n7) {Node 7};
+ \node[worker, right=0.3cm of n7] (n8) {Node 8};
+ \foreach \n in {n1,n2,n3,n4,n5,n6,n7,n8}{
+ \draw[-{Latex[length=1.0mm]}] (mgr.south) -- (\n.north)
+ node[midway, sloped, above, font=\tiny] {};
+ }
+ \node[below=0.15cm of n1, font=\tiny, align=center] {1M Rays};
+ \node[below=0.15cm of n8, font=\tiny, align=center] {1M Rays};
+ \end{tikzpicture}
+ \caption{Manager-Worker-Topologie: Der Manager verteilt via SSH die kompilierte Binary und startet die Ausführung auf allen acht Worker-Nodes parallel (synchronisiert über \texttt{wait}).}
+ \label{fig:cluster-arch}
+\end{figure}
+
+\paragraph{Implementierung}
+Für die automatisierte Ausführung wurde ein Ed25519-Schlüsselpaar auf dem Manager-Node erzeugt und auf alle Worker-Nodes verteilt. Die Knotenadressierung erfolgte über statische IP-Adressen, da im Cluster keine Namensauflösung konfiguriert war.
+Die Rust-Binary wurde zentral kompiliert und per \texttt{scp} verteilt. Das Skript \texttt{run\_cluster.sh} startet die Simulationen als Hintergrundprozesse und synchronisiert deren Abschluss. Nach Terminierung aller Prozesse werden die acht Ergebnisdateien auf den Manager zurückkopiert, wo ein Python-Skript (\texttt{merge\_results.py}) die Teilergebnisse zu einer einheitlichen Impulsantwort konsolidiert.
+
+

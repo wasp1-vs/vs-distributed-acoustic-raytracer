@@ -1,0 +1,69 @@
+\section{Einleitung}
+\label{sec:einleitung}
+
+\subsection{Motivation: Die Notwendigkeit physikalisch korrekter Raumakustik}
+\label{subsec:motivation}
+
+Die räumliche Wahrnehmung von Schallereignissen basiert auf der Auswertung komplexer Reflexions- und Absorptionsmuster durch das menschliche Gehör.
+In Anwendungsbereichen wie der digitalen Audioproduktion,
+der Architekturakustik sowie immersiven Umgebungen (z.\,B. Virtual Reality) ist eine physikalisch akkurate Reproduktion dieser Raumakustik maßgeblich für die Authentizität der Simulation.
+
+Etablierte Verfahren der digitalen Signalverarbeitung (DSP) verwenden zur Raumsimulation traditionell algorithmische Halleffekte (Reverbs).
+Diese Systeme generieren späte Reflexionen (\textit{Late Reverberation}) durch Delay-Netzwerke und Feedback-Schleifen, wodurch das zeitliche Abklingen der Schallenergie künstlich angenähert wird.
+Da diese Algorithmen nicht auf realen Geometrien basieren, können sie raumspezifische physikalische Phänomene wie die frequenz- und winkelabhängige Materialabsorption,
+den entfernungsbedingten Energieabfall (\textit{Inverse Square Law}) sowie diskrete Phasenauslöschungen (Kammfiltereffekte) nicht nativ abbilden.
+
+Um eine höhere physikalische Genauigkeit zu erzielen, ist die Berechnung der exakten Schallausbreitung im Raum erforderlich.
+Das akustische Raytracing simuliert hierbei die Ausbreitungswege von Schallwellen geometrisch.
+Die praktische Umsetzung dieses deterministischen und stochastischen Verfahrens scheiterte in der Vergangenheit oftmals an der hohen Rechenkomplexität,
+da für eine realistische Dichte des simulierten Schallfeldes Millionen von Strahlengängen berechnet werden müssen.
+Durch die Nutzung moderner Multi-Core-Architekturen und hochoptimierter, nebenläufiger (multithreaded) Software-Designs lassen sich diese Berechnungen mittlerweile effizient auf lokalen Systemen durchführen.
+Dies motiviert die Entwicklung von Systemen, die eine physikalisch korrekte Berechnung der Raumgeometrie mit einer direkten DSP-Anwendung auf Audiosignale verbinden.
+
+\subsection{Zielsetzung}
+\label{subsec:zielsetzung}
+
+Das Hauptziel dieser Arbeit ist die Konzeption und Implementierung einer hocheffizienten, nebenläufigen (multithreaded) Raytracing-Engine zur physikalisch korrekten Simulation von Raumakustik.
+Um eine performante und modular erweiterbare Pipeline zu schaffen, werden folgende Teilziele definiert:
+
+\begin{enumerate}
+    \item \textbf{Physikalisch akkurate Akustiksimulation:}\\
+    Im Zentrum der Entwicklung steht die deterministische und stochastische Berechnung früher Reflexionen (\textit{Early Reflections}) und der späten Hallfahne (\textit{Late Reverberation}).
+    Das System muss grundlegende physikalische Gesetzmäßigkeiten nativ abbilden, darunter den entfernungsbedingten Energieabfall (\textit{Inverse Square Law}),
+    material- und winkelabhängige Absorptionskoeffizienten sowie laufzeitbedingte Signalverschmierungen (\textit{Temporal Smearing}).
+    Die Ausgabe dieser Simulation erfolgt in Form einer diskreten Raumimpulsantwort (Impulse Response, IR).
+
+    \item \textbf{Maximierung der Rechenleistung durch CPU-Multithreading:}\\
+    Ein zentrales technisches Ziel ist die Überwindung bisheriger Performance-Engpässe bei der Berechnung von Millionen von Schallstrahlen.
+    Anstelle eines netzwerkbasierten, verteilten Systems wird ein lokaler, hochgradig parallelisierter Ansatz verfolgt.
+    Durch den Einsatz der Programmiersprache \texttt{Rust} und der Datenparallelisierungs-Bibliothek \texttt{rayon} soll die CPU-Auslastung durch dynamisches \textit{Work-Stealing} maximiert werden.
+    Dies gewährleistet eine speichersichere und recheneffiziente Ausführung der Monte-Carlo-Integration ohne den Overhead klassischer Cluster-Frameworks.
+
+    \item \textbf{Strikte architektonische Entkopplung:}\\
+    Die Systemarchitektur verlangt eine klare Trennung der Domänen Physik und Audio.
+    Die rechenintensive Berechnung der Strahlengänge und Raumgeometrien wird vollständig in Rust gekapselt.
+    Die Orchestrierung der Pipeline, die Aggregation der JSON-basierten Simulationsdaten, die anschließende digitale Signalverarbeitung (DSP) sowie die rechenintensive Faltung
+    (\textit{Convolution}) der berechneten Impulsantworten mit trockenen Audiosignalen erfolgen in Python.
+    Diese strikte Entkopplung stellt sicher, dass das Geometrie-Backend (2D/3D) unabhängig von der Audioverarbeitung weiterentwickelt werden kann.
+\end{enumerate}
+
+\subsection{Aufbau der Arbeit}
+\label{subsec:aufbau_der_arbeit}
+
+Um die genannten Zielsetzungen systematisch zu adressieren, ist die vorliegende Arbeit wie folgt strukturiert:
+
+\paragraph{Kapitel 2} legt das theoretische Fundament.
+Zunächst werden die akustischen Prinzipien der Schallausbreitung im Raum erläutert, darunter das Abstandsgesetz (\textit{Inverse Square Law}) und die Materialabsorption.
+Darauf aufbauend wird das stochastische Verfahren der Monte-Carlo-Integration im Kontext des Raytracings beschrieben.
+Ebenso werden die Grundlagen der digitalen Signalverarbeitung (DSP) für die schnelle Faltung sowie die informationstechnischen Grundlagen parallelisierter Systeme (Amdahls Gesetz) dargelegt.
+
+\paragraph{Kapitel 3} widmet sich der Projektorganisation sowie der Konzeption der Systemarchitektur.
+Es beleuchtet die iterative Aufgabenverteilung im Team und beschreibt die Einrichtung und Topologie der Cluster-Architektur zur verteilten Berechnung.
+
+\paragraph{Kapitel 4} beschreibt die spezifische Implementierung des akustischen Raytracers in Rust.
+Hierzu zählen die Vektormathematik der Schnittpunkttests, die Vermeidung von Fließkomma-Fehlern, die Datenparallelisierung mittels \texttt{rayon} zur Vermeidung von Speicherengpässen sowie die Entwicklung dedizierter Python-Visualisierungswerkzeuge.
+
+\paragraph{Kapitel 5} evaluiert und verifiziert das entwickelte System.
+Die physikalische Korrektheit der Simulation wird durch analytische Stresstests (Monte-Carlo-Verteilung, Nachhallzeiten nach Sabine) validiert. Zudem wird die Performance der parallelisierten Architektur anhand von Benchmark-Profilen ausgewertet.
+
+\paragraph{Kapitel 6} beinhaltet eine kritische Reflexion des Projekts, der Teamorganisation und der technischen Umsetzung. Die Arbeit schließt mit einer Zusammenfassung der Ergebnisse und einem Ausblick auf zukünftige Optimierungspotenziale.
