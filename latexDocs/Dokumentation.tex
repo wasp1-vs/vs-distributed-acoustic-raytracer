@@ -2,11 +2,19 @@
 
 \usepackage{amsmath}
 \usepackage{listings}
+\usepackage{amsopn}
+
+\lstdefinelanguage{Rust}{
+    morekeywords={fn, let, mut, pub, struct, use, mod, if, else, for, return, Some, None},
+    sensitive=true,
+    morecomment=[l]{//},
+    morestring=[b]"
+}
 \usepackage{amssymb}
 
 
-\begin{document}
 
+\begin{document}
 
     \section{Theoretische Grundlagen}
     \label{sec:grundlagen}
@@ -170,7 +178,6 @@
     \[P(t) = O + t\vec{D}\]
     wobei $t \ge 0$ sicherstellt, dass der Strahl vom Emitter aus im Raum weitergeht.
 
-
     \paragraph{Die Wand (Die Strecke)}
     %A wall is represented as a finite line segment defined by two endpoints, $A$ and $B$.
     %Any point $W$ on this segment is found by interpolating between the endpoints using a scalar parameter $u$.
@@ -214,7 +221,6 @@
         u = \frac{\vec{E} \times \vec{D}}{\det}\\
     \end{gather*}
 
-
     \subsection{Schnittpunkt-Validierung (Trefferbedingungen)}\label{subsec:intersection-validation-(hit-conditions)}
 
     %A mathematically valid solution to the linear system does not inherently guarantee a physical collision.
@@ -233,24 +239,24 @@
         \item \textbf{Parallelität:} Wenn $\det \approx 0$, sind der Strahl und die Wand perfekt parallel und schneiden sich niemals
         In der Implementierung ist ein kleiner Epsilon-Schwellenwert anstelle einer exakten Nullprüfung verwendet, um Gleitkommaungenauigkeiten zu vermeiden:
 
-    \begin{lstlisting}[language=Rust]
+        \begin{lstlisting}[language=Rust]
     if det.abs() < 1e-6 {
         return None;
     }
-    \end{lstlisting}
+        \end{lstlisting}
 
         \item \textbf{Richtungsabhängigkeit:} Wenn $t < 0$, schneiden sich die mathematischen Geraden, aber die Kollision erfolgt hinter dem Aussendungspunkt des Strahls:
-    \begin{lstlisting}[language=Rust]
+        \begin{lstlisting}[language=Rust]
     if ray_t < 0.0 {
         return None;
     }
-    \end{lstlisting}
+        \end{lstlisting}
         \item \textbf{Segmentgrenzen:} Wenn $u < 0$ oder $u > 1$, schneidet der Strahl zwar die unendliche Gerade, auf der die Wand liegt, verfehlt jedoch die physische Strecke
-    \begin{lstlisting}[language=Rust]
+        \begin{lstlisting}[language=Rust]
     if wall_u < 0.0 || wall_u > 1.0 {
         return None;
     }
-    \end{lstlisting}
+        \end{lstlisting}
     \end{itemize}
 
     \subsection{Vektorreflexion}\label{subsec:reflection-vector-calculation}
@@ -273,6 +279,138 @@
     \[\vec{R} = \vec{D} - 2(\vec{D} \cdot \vec{N})\vec{N}\]
     Innerhalb der Rust-Codebasis wird diese Berechnung der Vektorreflexion durch die \texttt{reflect} Methode optimiert, die vom \texttt{glam}-Crate bereitgestellt wird und
     Single Instruction, Multiple Data (SIMD)-Instruktionen nutzt, um diese Operationen mit minimalem Overhead durchzuführen.
+
+    \subsection{Umstellung auf 3D: Vec3 und Möller-Trumbore-Algorithmus}
+
+    Im Verlauf des Projekts wurde die ursprüngliche zweidimensionale Physik-Engine auf einen vollständig dreidimensionalen Simulationsraum erweitert. Ziel dieser Umstellung war es, Schallstrahlen nicht mehr ausschließlich in einer Ebene zu simulieren, sondern deren Ausbreitung in realistischen dreidimensionalen Räumen zu ermöglichen.
+    Hierfür wurden die Datentypen der zentralen
+    Simulationsobjekte (Ray, Mikrofonposition, Lautsprecherposition und Reflexionspunkte) von \texttt{Vec2} auf \texttt{Vec3} migriert. Während ein Punkt zuvor lediglich durch die Koordinaten $(x,y)$ beschrieben wurde, enthält ein Punkt im dreidimensionalen Raum zusätzlich eine Höhenkoordinate $z$:
+
+    \[
+    P = (x,y,z)
+    \]
+
+    Die Erweiterung auf drei Dimensionen betrifft insbesondere die Positionen von Lautsprechern, Mikrofonen, Reflexionspunkten sowie die Richtungsvektoren der ausgesendeten Schallstrahlen.
+
+    \subsubsection{Ablösung des 2D-Segment-Schnitts}
+
+    Der bisher verwendete Strahl-Segment-Schnitt konnte ausschließlich Kollisionen mit zweidimensionalen Wandsegmenten berechnen. Für eine physikalisch korrekte Simulation in 3D müssen Schallstrahlen jedoch mit dreidimensionalen Flächen interagieren.
+
+    Aus diesem Grund werden Wände nicht mehr als Liniensegmente modelliert, sondern als Dreiecke. Dreiecke stellen die Standardrepräsentation polygonaler Oberflächen in der Computergrafik und Physiksimulation dar und ermöglichen die Darstellung beliebig komplexer Geometrien.
+
+    \newpage
+    \subsubsection{Möller-Trumbore-Algorithmus}
+
+    Zur Berechnung von Strahl-Dreieck-Schnittpunkten wurde der Möller-Trumbore-Algorithmus implementiert. Dieser Algorithmus gehört zu den am häufigsten eingesetzten Verfahren im Raytracing, da er Schnittpunkte direkt berechnen kann, ohne zuvor die Ebenengleichung des Dreiecks bestimmen zu müssen.
+    Gegeben sind:
+
+    \begin{itemize}
+    \item Ursprung des Strahls $O$
+    \item Richtungsvektor des Strahls $\vec{D}$
+    \item Die drei Eckpunkte des Dreiecks $V_0$, $V_1$ und $V_2$
+    \end{itemize}
+
+    Zunächst werden die beiden Kantenvektoren des Dreiecks berechnet:
+
+    \[
+    \vec{E_1} = V_1 - V_0
+    \]
+
+    \[
+    \vec{E_2} = V_2 - V_0
+    \]
+
+    Anschließend wird mithilfe von Kreuz- und Skalarprodukten überprüft, ob der Strahl das Dreieck trifft und ob sich der Schnittpunkt innerhalb der Dreiecksgrenzen befindet.
+
+    Der Algorithmus liefert dabei drei wichtige Parameter:
+
+    \begin{itemize}
+    \item $t$ : Entfernung des Schnittpunkts entlang des Strahls
+    \item $u$ : baryzentrische Koordinate innerhalb des Dreiecks
+    \item $v$ : baryzentrische Koordinate innerhalb des Dreiecks
+    \end{itemize}
+
+    Ein gültiger Schnittpunkt liegt nur dann vor, wenn folgende Bedingungen erfüllt sind:
+
+    \[
+    t > 0
+    \]
+
+    \[
+    0 \leq u \leq 1
+    \]
+
+    \[
+    0 \leq v \leq 1
+    \]
+
+    \[
+    u + v \leq 1
+    \]
+
+    Werden diese Bedingungen erfüllt, befindet sich der Schnittpunkt innerhalb des Dreiecks und eine Reflexion kann berechnet werden.
+
+    \vspace{0.3em}
+    Der folgende Codeausschnitt zeigt den Kern des Möller-Trumbore-Schnittpunkttests.
+    Die vollständige Implementierung befindet sich in
+    \texttt{rust\_service/src/geometry.rs} in der Funktion
+    \texttt{check\_intersection}.
+
+    \begin{lstlisting}
+    let edge1 = triangle.v1 - triangle.v0;
+    let edge2 = triangle.v2 - triangle.v0;
+
+    let h = ray.direction.cross(edge2);
+    let a = edge1.dot(h);
+
+    if a.abs() < epsilon {
+        return None;
+    }
+
+    let f = 1.0 / a;
+    let s = ray.origin - triangle.v0;
+    let u = f * s.dot(h);
+
+    if u < 0.0 || u > 1.0 {
+        return None;
+    }
+
+    let q = s.cross(edge1);
+    let v = f * ray.direction.dot(q);
+
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+
+    let t = f * edge2.dot(q);
+    \end{lstlisting}
+
+    \subsubsection{Reflexionsberechnung}
+
+    Nach erfolgreicher Kollisionsprüfung wird die Oberflächennormale des Dreiecks bestimmt. Die Oberflächennormale wird zunächst normiert,
+    um einen Einheitsnormalenvektor zu erhalten. Diese ergibt sich aus dem Kreuzprodukt der beiden Kantenvektoren:
+
+    \[
+    \vec{N} = \vec{E_1} \times \vec{E_2}
+    \]
+
+    Die Richtung des reflektierten Strahls wird anschließend durch die allgemeine Reflexionsgleichung berechnet:
+
+
+    \[
+    \vec{R}
+    =
+    \vec{D}
+    -
+    2(\vec{D}\cdot\vec{N})\vec{N}
+    \]
+
+    Dadurch entstehen physikalisch plausible Reflexionen an dreidimensionalen Oberflächen.
+
+    \subsubsection{Ergebnis der Umstellung}
+
+    Die erfolgreiche Migration von \texttt{Vec2} auf \texttt{Vec3} bildet die Grundlage für zukünftige Erweiterungen der Physik-Engine. Durch die Implementierung des Möller-Trumbore-Algorithmus können nun beliebige polygonale 3D-Oberflächen verarbeitet werden. Damit wurde die Grundlage geschaffen, realistische dreidimensionale Raumakustik mit beliebig komplexen Polygonnetzen zu simulieren. Die bisherige Beschränkung auf zweidimensionale Wandsegmente wurde vollständig aufgehoben.
+
 
 
 
@@ -358,15 +496,63 @@ walls: &Vec<Wall>
     \end{lstlisting}
 
 
-    \section{Leistungsoptimierungen und Profiling}
-    \label{sec:optimizations}
+    \newpage
+    \section{Systemarchitektur und Pipeline-Orchestrierung}
+    \label{sec:System}
 
+    \subsection{Python-Subprozess Runner und JSON-Ingestion}
+
+    Neben der Rust-Physik-Engine wurde eine Python-Schnittstelle implementiert, um die vorkompilierte Rust-Binary automatisiert aus der Python-Pipeline heraus zu starten. Diese Schnittstelle befindet sich in der Datei \texttt{python\_service/rust\_runner.py} und bildet die Verbindung zwischen der performanten Rust-Simulation und den weiteren Verarbeitungsschritten in Python.
+
+    \vspace{0.3em}
+    Die Funktion \texttt{run\_rust\_and\_load\_json} erhält den Pfad zur Rust-Binary sowie den erwarteten Pfad zur Ausgabedatei \texttt{ir\_output.json}. Zunächst werden die übergebenen Pfade geprüft. Existiert die Rust-Binary nicht oder zeigt der Pfad nicht auf eine Datei, wird ein klarer Fehler ausgelöst. Dadurch werden fehlerhafte Konfigurationen früh erkannt.
+
+    \vspace{0.3em}
+    Anschließend startet Python die Rust-Binary über das Modul \texttt{subprocess}. Die Rust-Simulation läuft dabei als externer Prozess. Python wartet, bis dieser Prozess vollständig beendet ist, und prüft danach den Rückgabecode. Falls die Rust-Binary mit einem Fehler beendet wird, werden sowohl \texttt{stdout} als auch \texttt{stderr} ausgegeben, um die Fehlersuche zu erleichtern.
+
+    \vspace{0.3em}
+    Nach erfolgreicher Ausführung wird geprüft, ob die Datei \texttt{ir\_output.json} tatsächlich erzeugt wurde. Diese Datei enthält die von Rust berechneten Impulsantwort-Daten, insbesondere die Verzögerungszeiten und Druckwerte der empfangenen Schallstrahlen. Die JSON-Datei wird anschließend geöffnet, mit \texttt{json.load} eingelesen und als Python-Dictionary zurückgegeben.
+
+
+    Der folgende Codeausschnitt zeigt den zentralen Ablauf der Schnittstelle:
+    \vspace{0.3em}
+
+    \begin{lstlisting}
+    result = subprocess.run(
+        [str(rust_binary)],
+        cwd=rust_service_dir,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError("Rust-Binary ist fehlgeschlagen.")
+
+    with output_file.open("r", encoding="utf-8") as file:
+        ir_data = json.load(file)
+
+    return ir_data
+    \end{lstlisting}
+
+    Die Kommunikation zwischen Rust und Python erfolgt über die Datei
+    \texttt{ir\_output.json}. Dadurch bleibt die Physik-Simulation in Rust,
+    während Python die weitere Verarbeitung übernimmt. Die Lösung ist modular,
+    einfach testbar und benötigt keine speziellen Bindings wie \texttt{PyO3}.
+
+    Die Funktion wurde anschließend mit der Testdatei
+    \texttt{test\_rust\_runner\_manual.py} überprüft. Dabei wurde bestätigt,
+    dass die von Rust erzeugte JSON-Datei erfolgreich geladen wird und die
+    Datenstruktur die erwarteten Schlüssel \texttt{metadata} und \texttt{hits}
+    enthält.
+
+
+    \section{Leistungsoptimierungen und Profiling}
+        \label{sec:optimizations}
     Benchmarking the compiled binary (utilizing Rust's \texttt{--release} flag for maximum LLVM optimization)
     revealed significant bottlenecks and subsequent optimization opportunities within the parallelized architecture.
 
     Das Benchmarking der kompilierten Binärdatei (unter Verwendung des \texttt{--release} flag und dem \texttt{let var = Instant::now();} timer) deckte signifikante
     Engpässe und darauffolgende Optimierungsmöglichkeiten innerhalb der parallelisierten Architektur auf.
-
 
     \subsection{Reduzierung des Speicherallokations-Overheads: \texttt{flat\_map} vs. \texttt{fold}}
     \label{sec:memory_overhead}
@@ -393,7 +579,6 @@ walls: &Vec<Wall>
     %Instead of allocating memory per ray, the \texttt{fold} operation provisions exactly one thread-local buffer (initialized via \texttt{Vec::with\_capacity()}) per CPU core.
     %The cores accumulate their local results and merge them only upon thread completion.
     %This architectural shift reduced heap allocations by orders of magnitude, allowing the system to process $100,000,000$ rays without memory exhaustion.
-
 
     \subsection{Benchmarking Ergebnisse und I/O Overhead}
     \label{sec:benchmarks}
