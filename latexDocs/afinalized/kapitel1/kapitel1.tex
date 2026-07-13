@@ -52,18 +52,18 @@ Um eine performante und modular erweiterbare Pipeline zu schaffen, werden folgen
 
 Um die genannten Zielsetzungen systematisch zu adressieren, ist die vorliegende Arbeit wie folgt strukturiert:
 
-\paragraph{Kapitel 3} legt das theoretische Fundament.
+\paragraph{Kapitel 2} legt das theoretische Fundament.
 Zunächst werden die akustischen Prinzipien der Schallausbreitung im Raum erläutert, darunter das Abstandsgesetz (\textit{Inverse Square Law}) und die Materialabsorption.
 Darauf aufbauend wird das stochastische Verfahren der Monte-Carlo-Integration im Kontext des Raytracings beschrieben.
 Ebenso werden die Grundlagen der digitalen Signalverarbeitung (DSP) für die schnelle Faltung sowie die informationstechnischen Grundlagen parallelisierter Systeme (Amdahls Gesetz) dargelegt.
 
-\paragraph{Kapitel 4} widmet sich der Projektorganisation sowie der Konzeption der Systemarchitektur.
+\paragraph{Kapitel 3} widmet sich der Projektorganisation sowie der Konzeption der Systemarchitektur.
 Es beleuchtet die iterative Aufgabenverteilung im Team und beschreibt die Einrichtung und Topologie der Cluster-Architektur zur verteilten Berechnung.
 
-\paragraph{Kapitel 5} beschreibt die spezifische Implementierung des akustischen Raytracers in Rust.
+\paragraph{Kapitel 4} beschreibt die spezifische Implementierung des akustischen Raytracers in Rust.
 Hierzu zählen die Vektormathematik der Schnittpunkttests, die Vermeidung von Fließkomma-Fehlern, die Datenparallelisierung mittels \texttt{rayon} zur Vermeidung von Speicherengpässen sowie die Entwicklung dedizierter Python-Visualisierungswerkzeuge.
 
-\paragraph{Kapitel 6} evaluiert und verifiziert das entwickelte System.
+\paragraph{Kapitel 5} evaluiert und verifiziert das entwickelte System.
 Die physikalische Korrektheit der Simulation wird durch analytische Stresstests (Monte-Carlo-Verteilung, Nachhallzeiten nach Sabine) validiert. Zudem wird die Performance der parallelisierten Architektur anhand von Benchmark-Profilen ausgewertet.
 
-\paragraph{Kapitel 7} beinhaltet eine kritische Reflexion des Projekts, der Teamorganisation und der technischen Umsetzung. Die Arbeit schließt mit einer Zusammenfassung der Ergebnisse und einem Ausblick auf zukünftige Optimierungspotenziale.
+\paragraph{Kapitel 6} beinhaltet eine kritische Reflexion des Projekts, der Teamorganisation und der technischen Umsetzung. Die Arbeit schließt mit einer Zusammenfassung der Ergebnisse und einem Ausblick auf zukünftige Optimierungspotenziale.
