@@ -107,29 +107,10 @@ Zur Lösung dieses Problems wurde ein Epsilon-Wert ($\epsilon$) eingeführt. Die
   \includegraphics[width=0.8\textwidth]{kapitel4/fixedshadowacne}
   \caption{2D-Visualizer mit implementiertem Epsilon-Fix.}
   \label{fig:shadowacne2}
-
-  \newpage
-\section{Binaurale 3D-Audio-Ausgabe mit HRTF}
-\label{sec:binaural_3d_audio}
-
-Mit der Erweiterung auf 3D-Raumgeometrie wurde die Audioausgabe um räumliche HRTF-basierte Verarbeitung erweitert.
-
-\subsection{Richtungsdaten aus der Simulation}
-\label{subsec:direction_data}
-Die Rust-Simulation speichert für jeden Mikrofontreffer zusätzlich zur Ankunftszeit (\texttt{delay}) und Lautstärke (\texttt{pressure}) die Einfallsrichtung (\texttt{direction}) als 3D-Vektor.
-Diese Richtungen werden in der parallelen Simulation gesammelt und in \texttt{ir\_output.json} exportiert.
-
-\subsection{HRTF-Verarbeitung}
-\label{subsec:hrtf_processing}
-Für die binaurale Faltung wird eine HRTF-Datenbank (z.B. CIPIC SOFA-Datei) geladen.
-Jede Reflexion wird anhand ihrer Richtung mit der passenden HRIR für linkes und rechtes Ohr gefaltet.
-Das Ergebnis ist eine Stereo-WAV-Datei mit räumlichem Echo.
-
-\subsection{Integration}
-\label{subsec:hrtf_integration}
-Die Python-Pipeline nutzt die Richtungsdaten aus \texttt{ir\_output.json}.
-Falls Richtungen vorhanden sind, wird die HRTF-basierte Faltung verwendet, sonst die klassische.
-
 \end{figure}
+  \newpage
+
+
+
 
 

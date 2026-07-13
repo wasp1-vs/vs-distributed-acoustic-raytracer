@@ -1,29 +1,20 @@
+\section{Binaurale 3D-Audio-Ausgabe mit HRTF}
+\label{sec:binaural_3d_audio}
 
-% ==========================================
-% KAPITEL 6: REFLEXION & FAZIT
-% ==========================================
-\section{Kritische Reflexion und Fazit}
-\label{sec:reflexion}
+Mit der Erweiterung auf 3D-Raumgeometrie wurde die Audioausgabe um räumliche HRTF-basierte Verarbeitung erweitert.
 
-\subsection{Kritische Reflexion der Disziplinen}
-\label{subsec:kritische_reflexion}
+\subsection{Richtungsdaten aus der Simulation}
+\label{subsec:direction_data}
+Die Rust-Simulation speichert für jeden Mikrofontreffer zusätzlich zur Ankunftszeit (\texttt{delay}) und Lautstärke (\texttt{pressure}) die Einfallsrichtung (\texttt{direction}) als 3D-Vektor.
+Diese Richtungen werden in der parallelen Simulation gesammelt und in \texttt{ir\_output.json} exportiert.
 
-\paragraph{Digitale Signalverarbeitung (Python-DSP-Pipeline)}
-Die eigentliche Signalverarbeitung erwies sich als der algorithmisch unkritischste Teil der Pipeline; die zentrale Herausforderung war organisatorischer Natur. So existierten zwischenzeitlich zwei unabhängig entstandene Verfahren für die räumliche Wiedergabe: ein einfaches Azimut-Panning in sowie eine vollständige HRTF-Faltung über SOFA-Datensätze. Die spätere Konsolidierung verdeutlichte, dass paralleles Arbeiten an derselben Schnittstelle ohne frühe Absprache zu Doppelentwicklungen führt.
-Eine weitere Lehre betraf die Kalibrierung der Simulationsparameter. Ein überdimensionierter virtueller Mikrofonradius von $3\,\text{m}$ in einem Raum generierte riesige JSON-Datenmengen ($>1\,\text{GB}$). Ein physikalisch plausibler Radius ($0{,}5\,\text{m}$) verringerte die I/O-Last drastisch. Eine numerisch "funktionierende" Simulation ist ohne realistische Standardparameter oftmals unbrauchbar.
+\subsection{HRTF-Verarbeitung}
+\label{subsec:hrtf_processing}
+Für die binaurale Faltung wird eine HRTF-Datenbank (z.B. CIPIC SOFA-Datei) geladen.
+Jede Reflexion wird anhand ihrer Richtung mit der passenden HRIR für linkes und rechtes Ohr gefaltet.
+Das Ergebnis ist eine Stereo-WAV-Datei mit räumlichem Echo.
 
-\paragraph{Cluster-Infrastruktur und Parallelisierung}
-Die gewählte Lösung -- statische IP-Adressierung und eine manuell erstellte SSH-Liste -- war für die gegebene Größenordnung pragmatisch, stellt jedoch keinen hochgradig skalierbaren Ansatz dar. Ein erheblicher Zeitaufwand floss in nicht-dokumentierte Zugangsdaten-Resets und SSH-Fehlkonfigurationen. Dies zeigt eine Grenze der klassischen Erfolgsmessung über reine Codezeilen auf: Ein wesentlicher Teil des Gesamtaufwands bestand aus Infrastrukturarbeit, die für das Funktionieren der verteilten Ausführung unabdingbar war.
-
-\paragraph{Erste Integration von SOFA und Python-Bibliotheken für 3D-Audio}
-Für die Realisierung der räumlichen Audioausgabe wurde erstmals mit dem SOFA-Dateiformat (Spatially Oriented Format for Acoustics) und den Python-Bibliotheken \texttt{pysofaconventions} sowie \texttt{scipy.signal} gearbeitet. Die SOFA-Datei \texttt{subject\_003.sofa} aus der CIPIC-Datenbank wurde über die selbst entwickelte Klasse \texttt{HRTFDatabase} geladen, die die gemessenen HRIR-Impulsantworten für verschiedene Azimut- und Elevationswinkel bereitstellt.
-Die eigentliche binaurale Faltung erfolgte mit \texttt{scipy.signal.oaconvolve}, um die linken und rechten Ohrimpulsantworten mit dem trockenen Audiosignal zu kombinieren. Diese erste Integration ermöglichte die Erzeugung eines räumlichen 3D-Echos, das über Kopfhörer als realistischer Nachhall wahrnehmbar ist und die physikalisch korrekte Simulation der Raumakustik in ein hörbares Ergebnis überführt.
-
-\paragraph{Reflexion als Team}
-Über die fachlichen Bereiche hinaus lässt sich auch der organisatorische Ablauf des Projekts kritisch einordnen. Die iterative, erst im Projektverlauf entstehende Aufgabenverteilung ermöglichte zwar hohe Flexibilität für neu aufkommende Probleme (wie den Epsilon-Fix oder die Wurzel-Korrektur), erschwerte jedoch in den Anfangsphasen eine verlässliche Zeit- und Meilensteinplanung.
-
-\subsection{Fazit und Ausblick}
-\label{subsec:ausblick}
-
-Die vorliegende Arbeit hat erfolgreich demonstriert, dass sich die physikalisch korrekte, stochastische Berechnung von Raumakustik durch moderne, lock-free Parallelisierungsansätze (Rust, Rayon) effizient auf lokaler Hardware realisieren lässt. Die strikte Entkopplung der Geometrie-Engine von der Python-DSP-Pipeline bewährte sich als robustes Software-Design-Muster.
-Als Weiterentwicklung der Cluster-Architektur bietet sich zukünftig eine \emph{dynamische Lastverteilung} an, bei der die Ray-Anzahl pro Node anhand der Hardware-Metriken dynamisch skaliert wird, um den in Abbildung~\ref{fig:durchsatz} gezeigten Durchsatz weiter zu maximieren.
+\subsection{Integration}
+\label{subsec:hrtf_integration}
+Die Python-Pipeline nutzt die Richtungsdaten aus \texttt{ir\_output.json}.
+Falls Richtungen vorhanden sind, wird die HRTF-basierte Faltung verwendet, sonst die klassische.
