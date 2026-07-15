@@ -67,7 +67,10 @@ Das Benchmarking der kompilierten Binärdatei (unter Verwendung des \texttt{--re
 Während die anfängliche parallele Implementierung den \texttt{flat\_map}-Iterator nutzte, offenbarte die Skalierung auf $100.000.000$ Strahlen einen kritischen Engpass. \texttt{flat\_map} allozierte dynamisch einen neuen \texttt{Vec} pro Strahl, was zu Millionen flüchtiger Heap-Allokationen, Memory Thrashing und letztlich dem Stillstand der Simulation führte. Durch das architektonische Refactoring auf das \texttt{fold}-Muster (Bereitstellung eines einzigen pre-allozierten Puffers pro CPU-Kern) wurden die Heap-Allokationen um mehrere Größenordnungen reduziert.
 
 \paragraph{I/O Engpass}
-Das Profiling der End-to-End-Ausführungszeit deckte einen massiven Engpass bei der Datenserialisierung auf. In einem Stresstest wurde die interne Simulation schnell ausgeführt ($0{,}64\,\text{s}$ Parallel), jedoch dominierte das Schreiben des gigantischen JSON-Datensatzes auf die Festplatte die Gesamtlaufzeit ($>33\,\text{s}$), was die absolute Notwendigkeit eines RAM-gestützten gepufferten Schreibvorgangs (\texttt{BufWriter}) unterstrich.
+Das Profiling der End-to-End-Ausführungszeit deckte einen massiven Engpass bei der Datenserialisierung auf.
+In einem Stresstest wies die interne parallele Simulation eine geringe Laufzeit auf ($0{,}64\,\text{s}$),
+jedoch dominierte das Schreiben des sehr umfangreichen JSON-Datensatzes auf die Festplatte die Gesamtlaufzeit ($>33\,\text{s}$).
+Dies unterstrich Notwendigkeit eines RAM-gestützten gepufferten Schreibvorgangs (\texttt{BufWriter}).
 
 \subsection{Skalierung der Cluster-Architektur}
 \label{subsec:cluster_eval}

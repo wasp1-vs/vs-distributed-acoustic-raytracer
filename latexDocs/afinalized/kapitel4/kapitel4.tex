@@ -29,9 +29,12 @@ Innerhalb der Rust-Codebasis wird diese Berechnung durch die \texttt{reflect} Me
 Ein wesentlicher Vorteil von Rust im High-Performance-Computing sind seine strengen Garantien zur Kompilierzeit gegen Data-Races. Die Verteilung einer iterativen Physikschleife auf Multi-Core-Architekturen erfordert oft komplexe Thread-Sperrlogiken. In dieser Engine wird dieser Overhead vermieden durch ein funktionales, datenparalleles Paradigma unter Verwendung des \texttt{rayon}-Crates.
 
 \paragraph{Von Shared Mutation zu thread-lokalem-Folding}
-Bei einer Single-Thread-Ausführung hängen Iterationen die Ergebnisse an ein gemeinsames dynamisches Array an. Diese Schleife auf zahlreiche Threads aufzuteilen, würde zu gleichzeitigen Schreibversuchen auf dieselben Speicheradressen führen. Anstatt Locks zu verwenden, nutzt die Architektur das Trait \texttt{into\_par\_iter()} von \texttt{rayon} in Kombination mit einer \texttt{fold}- und \texttt{reduce}-Pipeline.
+Bei einer Single-Thread-Ausführung fügen die einzelnen Iterationen ihre Ergebnisse einem gemeinsamen dynamischen Array hinzu.
+Diese Schleife auf zahlreiche Threads aufzuteilen, würde zu gleichzeitigen Schreibversuchen auf dieselben Speicheradressen führen.
+Anstatt Locks zu verwenden, nutzt die Architektur das Trait \texttt{into\_par\_iter()} von \texttt{rayon} in Kombination mit einer \texttt{fold}- und \texttt{reduce}-Pipeline.
 
-Jeder Thread simuliert unabhängig seine Teilmenge an Strahlen und hängt die Ergebnisse sequenziell in seinen eigenen lokalen Speicherbereich an. Sobald ein Thread seine Arbeitslast abgeschlossen hat, wird die \texttt{reduce}-Phase aktiviert, welche diese isolierten Puffer sicher zu den endgültigen Arrays zusammenführt.
+Jeder Thread simuliert unabhängig seine Teilmenge an Strahlen und hängt die Ergebnisse sequenziell in seinen eigenen lokalen Speicherbereich an.
+Sobald ein Thread seine Arbeitslast abgeschlossen hat, wird die \texttt{reduce}-Phase aktiviert, welche diese isolierten Puffer sicher zu den endgültigen Arrays zusammenführt.
 
 \begin{lstlisting}[language=Rust]
 use rayon::prelude::*;
@@ -98,9 +101,14 @@ Wenn ein Strahlengang an einer Wand reflektiert wird, dient dieser mathematische
   \label{fig:shadowacne1}
 \end{figure}
 
-Die ursprüngliche Abbruchbedingung lautete: \texttt{if ray\_t < 0.0 \{ return None; \}}. Da mikroskopisch negative Fließkomma-Werte oft verschluckt oder fehlerhaft evaluiert wurden, registrierte die Engine fälschlicherweise sofortige, valide Treffer auf derselben Wand. Der Strahl ,,reflektierte`` in einer Endlosschleife am selben Punkt, bis das \texttt{max\_bounces}-Limit erschöpft war. In der Computergrafik ist dieses Phänomen als \emph{Shadow Acne} bekannt.
-
-Zur Lösung dieses Problems wurde ein Epsilon-Wert ($\epsilon$) eingeführt. Die Bedingung wurde zu \texttt{if ray\_t < 0.001 \{ return None; \}} modifiziert. Ein berechneter Schnittpunkt wird folglich nur als valide betrachtet, wenn der Strahl eine Mindestdistanz von $1\,\text{mm}$ zurückgelegt hat. Die erneute Visualisierung bestätigte, dass das physikalische Verhalten nun korrekt simuliert wurde.
+Die ursprüngliche Abbruchbedingung lautete: \texttt{if ray\_t < 0.0 \{ return None; \}}.
+Da sehr kleine negative Fließkomma-Werte aufgrund von Präzisionsverlusten oft ignoriert oder fehlerhaft evaluiert wurden, registrierte die Engine fälschlicherweise sofortige, valide Treffer auf derselben Wand.
+Der Strahl \"reflektierte\" in einer Endlosschleife am selben Punkt, bis das \texttt{max\_bounces}-Limit erschöpft war.
+In der Computergrafik ist dieses Phänomen als \emph{Shadow Acne} bekannt.
+Zur Lösung dieses Problems wurde ein Epsilon-Wert ($\epsilon$) eingeführt.
+Die Bedingung wurde zu \texttt{if ray\_t < 0.001 \{ return None; \}} modifiziert.
+Ein berechneter Schnittpunkt wird folglich nur als valide betrachtet, wenn der Strahl eine Mindestdistanz von $1\,\text{mm}$ zurückgelegt hat.
+Die erneute Visualisierung bestätigte, dass das physikalische Verhalten nun korrekt simuliert wurde.
 
 \begin{figure}[htbp]
   \centering

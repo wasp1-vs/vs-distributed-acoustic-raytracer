@@ -1,29 +1,910 @@
 
-% ==========================================
-% KAPITEL 7: REFLEXION & FAZIT
-% ==========================================
-\section{Kritische Reflexion und Fazit}
-\label{sec:reflexion}
+\lstdefinestyle{cemdsp}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    showstringspaces=false,
+    breaklines=true,
+    numbers=left,
+    numberstyle=\tiny,
+    frame=single,
+    tabsize=4
+}
 
-\subsection{Kritische Reflexion der Disziplinen}
-\label{subsec:kritische_reflexion}
 
-\paragraph{Digitale Signalverarbeitung (Python-DSP-Pipeline)}
-Die eigentliche Signalverarbeitung erwies sich als der algorithmisch unkritischste Teil der Pipeline; die zentrale Herausforderung war organisatorischer Natur. So existierten zwischenzeitlich zwei unabhängig entstandene Verfahren für die räumliche Wiedergabe: ein einfaches Azimut-Panning in sowie eine vollständige HRTF-Faltung über SOFA-Datensätze. Die spätere Konsolidierung verdeutlichte, dass paralleles Arbeiten an derselben Schnittstelle ohne frühe Absprache zu Doppelentwicklungen führt.
-Eine weitere Lehre betraf die Kalibrierung der Simulationsparameter. Ein überdimensionierter virtueller Mikrofonradius von $3\,\text{m}$ in einem Raum generierte riesige JSON-Datenmengen ($>1\,\text{GB}$). Ein physikalisch plausibler Radius ($0{,}5\,\text{m}$) verringerte die I/O-Last drastisch. Eine numerisch "funktionierende" Simulation ist ohne realistische Standardparameter oftmals unbrauchbar.
+\section{Signalverarbeitung: Faltungskern und frequenzabhängige Materialdämpfung}
+\label{sec:python-dsp}
 
-\paragraph{Cluster-Infrastruktur und Parallelisierung}
-Die gewählte Lösung -- statische IP-Adressierung und eine manuell erstellte SSH-Liste -- war für die gegebene Größenordnung pragmatisch, stellt jedoch keinen hochgradig skalierbaren Ansatz dar. Ein erheblicher Zeitaufwand floss in nicht-dokumentierte Zugangsdaten-Resets und SSH-Fehlkonfigurationen. Dies zeigt eine Grenze der klassischen Erfolgsmessung über reine Codezeilen auf: Ein wesentlicher Teil des Gesamtaufwands bestand aus Infrastrukturarbeit, die für das Funktionieren der verteilten Ausführung unabdingbar war.
+\subsection{Einordnung und Aufgabenstellung}
+\label{subsec:dsp-einordnung}
 
-\paragraph{Erste Integration von SOFA und Python-Bibliotheken für 3D-Audio}
-Für die Realisierung der räumlichen Audioausgabe wurde erstmals mit dem SOFA-Dateiformat (Spatially Oriented Format for Acoustics) und den Python-Bibliotheken \texttt{pysofaconventions} sowie \texttt{scipy.signal} gearbeitet. Die SOFA-Datei \texttt{subject\_003.sofa} aus der CIPIC-Datenbank wurde über die selbst entwickelte Klasse \texttt{HRTFDatabase} geladen, die die gemessenen HRIR-Impulsantworten für verschiedene Azimut- und Elevationswinkel bereitstellt.
-Die eigentliche binaurale Faltung erfolgte mit \texttt{scipy.signal.oaconvolve}, um die linken und rechten Ohrimpulsantworten mit dem trockenen Audiosignal zu kombinieren. Diese erste Integration ermöglichte die Erzeugung eines räumlichen 3D-Echos, das über Kopfhörer als realistischer Nachhall wahrnehmbar ist und die physikalisch korrekte Simulation der Raumakustik in ein hörbares Ergebnis überführt.
+Der in dieser Arbeit entwickelte Raumhall-Dienst trennt die physikalische
+Simulation strikt von der Signalverarbeitung. Die Rust-Engine verfolgt
+Schallstrahlen durch die Raumgeometrie und liefert als Ergebnis eine endliche
+Menge von Strahl-Treffern. Aus diesen erzeugt der Python-Dienst den hörbaren
+Nachhall.
+Dieser Abschnitt fokussiert sich auf die drei zentralen Verarbeitungsschritte zwischen den Rohdaten der Engine und dem fertigen Audiosignal.
 
-\paragraph{Reflexion als Team}
-Über die fachlichen Bereiche hinaus lässt sich auch der organisatorische Ablauf des Projekts kritisch einordnen. Die iterative, erst im Projektverlauf entstehende Aufgabenverteilung ermöglichte zwar hohe Flexibilität für neu aufkommende Probleme (wie den Epsilon-Fix oder die Wurzel-Korrektur), erschwerte jedoch in den Anfangsphasen eine verlässliche Zeit- und Meilensteinplanung.
+Zuerst wird aus den Strahl-Treffern die diskrete Impulsantwort (IR)
+konstruiert (\texttt{build\_impulse\_response},
+Abschnitt~\ref{subsec:build-ir}). Diese wird anschließend mit dem trockenen
+Eingangssignal gefaltet (\texttt{convolve}, Abschnitt~\ref{subsec:faltung}).
+Zuletzt gibt die frequenzabhängige Materialdämpfung dem zunächst breitbandigen
+Hall seinen materialtypischen Klang (\texttt{apply\_material\_absorption},
+Abschnitt~\ref{subsec:material}). Alle drei Funktionen liegen im Modul
+\texttt{convolution.py} des Python-Dienstes.
 
-\subsection{Fazit und Ausblick}
-\label{subsec:ausblick}
 
-Die vorliegende Arbeit hat erfolgreich demonstriert, dass sich die physikalisch korrekte, stochastische Berechnung von Raumakustik durch moderne, lock-free Parallelisierungsansätze (Rust, Rayon) effizient auf lokaler Hardware realisieren lässt. Die strikte Entkopplung der Geometrie-Engine von der Python-DSP-Pipeline bewährte sich als robustes Software-Design-Muster.
-Als Weiterentwicklung der Cluster-Architektur bietet sich zukünftig eine \emph{dynamische Lastverteilung} an, bei der die Ray-Anzahl pro Node anhand der Hardware-Metriken dynamisch skaliert wird, um den in Abbildung~\ref{fig:durchsatz} gezeigten Durchsatz weiter zu maximieren.
+Die angrenzenden Schnittstellen dieser Pipeline umfassen die Prozessbrücke zur Rust-Engine samt JSON-Ingestion \texttt{rust\_runner.py}
+sowie das Einlesen, Normalisieren und Schreiben der WAV-Dateien \texttt{wav\_handler.py}.
+ Innerhalb dieses Rahmens hat der Faltungskern einen klar
+umrissenen Vertrag. Er erhält von der \texttt{rust\_runner.py} Schicht das geparste
+Engine-Ergebnis als Python-Dictionary und von der (\texttt{wav\_handler.py}) Schicht das Trockensignal
+samt Abtastrate. Zurück liefert er das verhallte Signal roh und
+unnormalisiert. Die Pegelbehandlung übernimmt erst der Export.
+
+
+Aufbauend auf den zuvor definierten signaltheoretischen und raumakustischen Prinzipien setzt dieses Kapitel dort an,
+wo die skalare Modellierung der Wandabsorption der Rust-Engine endet.
+ Es behandelt die signalverarbeitungsseitige,
+frequenzbandweise Umsetzung der Materialdämpfung im Python-Dienst. Im Kern geht
+es um die Frage, wie aus einem pauschalen Druckwert pro Treffer wieder ein
+Nachhall wird, dessen Klangfarbe vom Material abhängt.
+
+Der Aufbau folgt dem Datenfluss. Abschnitt~\ref{subsec:build-ir} zeigt, wie aus
+den kontinuierlichen Ankunftszeiten der Strahlen ein abtastgenaues Array wird,
+und analysiert den dabei entstehenden Quantisierungsfehler.
+Abschnitt~\ref{subsec:faltung} begründet die Wahl des Faltungsalgorithmus,
+belegt sie mit einem Laufzeit-Benchmark und beschreibt die Mehrkanal- und
+Numerikaspekte der Implementierung. Abschnitt~\ref{subsec:material} entwickelt
+das Reflexionszahl-Modell der Materialdämpfung, dokumentiert die
+Oktavband-Filterbank und verifiziert das Verhalten an zwei akustisch
+gegensätzlichen Materialien. Abschnitt~\ref{subsec:dsp-zusammenfassung} fasst
+die Ergebnisse zusammen.
+
+%----------------------------------------------------------------------
+\subsection{Von den Strahl-Treffern zur diskreten Impulsantwort}
+\label{subsec:build-ir}
+
+\subsubsection{Datenmodell der Strahl-Treffer}
+\label{subsubsec:datenmodell}
+
+Die Rust-Engine beschreibt das akustische Verhalten des Raums nicht als
+kontinuierliche Funktion, sondern als Liste diskreter Ereignisse. Jeder Strahl,
+der das Empfängervolumen erreicht, hinterlässt zwei Zahlen: die
+Ankunftsverzögerung $\tau_j$ in Sekunden, gemessen ab dem Aussenden des
+Impulses an der Quelle, und den skalaren Restdruck $p_j$, also das, was nach
+allen Wandkontakten und der geometrischen Ausbreitungsdämpfung vom
+Ausgangsdruck übrig ist. Mehr liefert die Engine pro Treffer nicht.
+Über die vorgeschaltete Prozessbrücke werden diese Daten als geparstes JSON-Dictionary an den Faltungskern übergeben:
+
+
+\begin{lstlisting}[style=cemdsp, caption={Erwartetes Schema des Engine-Ergebnisses (Auszug aus dem Docstring von \texttt{convolve}).}, label={lst:schema}]
+ir_data["metadata"]["sample_rate"]: int
+ir_data["hits"]["delays_seconds"]: list[float]
+ir_data["hits"]["pressures"]: list[float]
+\end{lstlisting}
+
+Die beiden Listen sind positionsgleich, der $j$-te Eintrag in
+\texttt{delays\_seconds} gehört zum $j$-ten Eintrag in \texttt{pressures}.
+Genau genommen ist diese Trefferliste schon eine Impulsantwort, nur eben eine
+zeitkontinuierliche: eine gewichtete Summe von Dirac-Impulsen
+\[
+    h(t) \;=\; \sum_{j} p_j \,\delta(t - \tau_j).
+\]
+Gebraucht wird für die zeitdiskrete Faltung aus Abschnitt~2.3 aber eine Folge
+$h[i]$ auf dem Abtastraster des Audiosignals. Diese Übersetzung leistet
+\texttt{build\_impulse\_response}, und nur sie: Die Funktion weiß nichts über
+Dateiformate, Subprozesse oder Raumgeometrie, sie sieht allein die beiden
+Zahlenlisten und die Abtastrate.
+
+\subsubsection{Zeitdiskretisierung und Quantisierungsfehler}
+\label{subsubsec:quantisierung}
+
+Die Übersetzung auf das Abtastraster erfolgt durch Rundung auf den
+nächstgelegenen Abtastindex:
+\[
+    i_j \;=\; \operatorname{round}\!\bigl(\tau_j \cdot f_s\bigr).
+\]
+
+Im Folgenden wird der resultierende Quantisierungsfehler analysiert.
+Bei der Projekt-Abtastrate
+$f_s = 44{,}1$~kHz ($44100$~Hz; im Fließtext durchgängig als $44{,}1$~kHz
+notiert) liegt zwischen zwei Abtastwerten eine Periode von
+$1/f_s \approx 22{,}68~\mu\mathrm{s}$, und weil symmetrisch gerundet wird,
+verfehlt ein Treffer seinen wahren Zeitpunkt um höchstens eine halbe
+Abtastperiode:
+\[
+    \bigl|\Delta t\bigr|_{\max}
+    \;=\; \frac{0{,}5}{f_s}
+    \;=\; \frac{0{,}5}{44100~\text{Hz}}
+    \;\approx\; 11{,}34~\mu\mathrm{s}.
+\]
+Bei etwa $343$~m/s Schallgeschwindigkeit entsprechen diese
+$11{,}34~\mu\mathrm{s}$ einem Weglängenfehler von rund $3{,}9$~mm, weniger als
+eine Wandverkleidung dick ist; die Laufwege, die die Engine liefert, sind
+ohnehin deutlich unschärfer. Auch spektral passiert wenig. Selbst im höchsten
+modellierten Oktavband um $4$~kHz (Periodendauer $250~\mu\mathrm{s}$)
+verschiebt der maximale Rundungsfehler die Phase eines einzelnen Treffers um
+rund $16^\circ$.
+Eine subsample-genaue Platzierung durch bandbegrenzte Interpolation mit gefensterten sinc-Kernen würde die Berechnungskomplexität pro
+Array-Eintrag signifikant erhöhen.
+Für eine Hall-Anwendung, die auf der statistischen Überlagerung tausender Reflexionen basiert, ist dieser Rechenaufwand unverhältnismäßig.
+Die Rundung bleibt, als bewusste und dokumentierte Vereinfachung.
+
+Die Länge der Impulsantwort folgt aus dem größten gerundeten Index,
+$M = \max_j i_j + 1$; konfiguriert wird sie nicht, sie steckt in den Daten.
+Für die Beispiel-Impulsantwort aus Abbildung~\ref{fig:ir-stem}, deren Treffer
+bis knapp $0{,}45$~s reichen, sind das $M = 19842$ Samples, als
+\texttt{float64}-Array rund $155$~KiB. Das ist unkritisch.
+
+\subsubsection{Akkumulation gleichzeitiger Treffer mit \texttt{np.add.at}}
+\label{subsubsec:akkumulation}
+
+Nach der Rundung ist die Abbildung von Treffern auf Indizes nicht mehr
+injektiv, zwei Strahlen mit ähnlicher Weglänge können im selben Abtastwert
+landen.
+Aufgrund der physikalisch additiven Überlagerung der Druckanteile muss die Diskretisierung akkumulieren statt überschreiben.
+Bei der Standard-Zuweisung in NumPy tritt hierbei jedoch ein Datenverlust auf.
+ Die naheliegende Zuweisung
+\texttt{ir[indices] = pressures} überschreibt schlicht, bei doppelten Indizes
+überlebt nur der zuletzt geschriebene Wert. Auch die Inkrement-Form
+\texttt{ir[indices] += pressures} hilft nicht weiter: Sie ist gepuffert, NumPy
+liest die alten Werte einmal aus, addiert und schreibt zurück, pro Index wird
+also nur ein Beitrag wirksam und der Rest geht stillschweigend verloren.
+Korrekt akkumuliert erst die ungepufferte Variante
+\texttt{np.add.at(ir, indices, pressures)}, die die Addition für jedes
+Index-Vorkommen einzeln ausführt.
+
+Ein Zahlenbeispiel. Zwei Strahlen treffen nach
+$\tau_1 = 0{,}049998$~s mit $p_1 = 0{,}6$ und nach $\tau_2 = 0{,}050003$~s mit
+$p_2 = 0{,}3$ ein, beide runden auf denselben Index:
+\[
+    0{,}049998 \cdot 44100 = 2204{,}91 \;\to\; 2205,
+    \qquad
+    0{,}050003 \cdot 44100 = 2205{,}13 \;\to\; 2205.
+\]
+Mit \texttt{np.add.at} entsteht der physikalisch richtige Wert
+$h[2205] = 0{,}6 + 0{,}3 = 0{,}9$, mit der gepufferten Zuweisung dagegen
+$h[2205] = 0{,}3$, zwei Drittel der Reflexionsenergie an dieser Stelle wären
+unterschlagen. Das ist kein konstruierter Randfall. Dichte Impulsantworten
+drängen viele tausend Treffer auf wenige zehntausend Samples, Kollisionen sind
+dort der Regelfall, und der Fehler verfälschte das Abklingverhalten des
+gesamten Halls systematisch. Der vollständige Rechenkern ist kompakt:
+
+\begin{lstlisting}[style=cemdsp, caption={Diskretisierung und Akkumulation in \texttt{build\_impulse\_response}.}, label={lst:build-ir}]
+indices = np.round(delays * sample_rate).astype(np.int64)
+ir_length = int(indices.max()) + 1
+ir = np.zeros(ir_length, dtype=np.float64)
+np.add.at(ir, indices, pressures)
+return ir
+\end{lstlisting}
+
+Formal berechnet dieser Kern die diskrete Impulsantwort
+\[
+    h[i] \;=\; \sum_{j}\; p_j \cdot \bigl[\, i_j = i \,\bigr],
+    \qquad i = 0, \dots, M-1,
+\]
+mit der Iverson-Klammer $[\cdot]$, die genau dann eins ist, wenn die Bedingung
+erfüllt ist. Wie eine so konstruierte Impulsantwort aussieht, zeigt
+Abbildung~\ref{fig:ir-stem}: der Direktschall als dominanter erster Impuls,
+dahinter einzelne frühe Reflexionen, dann ein zunehmend dichter, abklingender
+Nachhallschwanz.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{kapitel7/ir_stem}
+    \caption{Aus Strahl-Treffern konstruierte Beispiel-Impulsantwort $h[i]$
+        über der Zeit ($0$ bis $0{,}5$~s). Der Direktschall bildet den ersten,
+        stärksten Impuls; danach folgen abklingende Reflexionen. Die Länge der
+        Impulsantwort beträgt $M = 19842$ Samples bei $f_s = 44{,}1$~kHz.}
+    \label{fig:ir-stem}
+\end{figure}
+
+\subsubsection{Validierung an der Systemgrenze}
+\label{subsubsec:validierung}
+
+\texttt{build\_impulse\_response} verarbeitet Daten, die aus einem fremden
+Prozess über eine JSON-Datei eintreffen.
+An dieser Systemgrenze ist eine strikte Eingabevalidierung erforderlich, um unerwartete Folgefehler in der nachgelagerten Verarbeitung zu verhindern.
+Innerhalb des Python-Dienstes wird dafür
+nicht erneut geprüft, die Fehlerbehandlung konzentriert sich auf den Übergang
+zwischen den Diensten. Sieben Fehlerklassen weist die Funktion explizit
+zurück:
+
+\begin{lstlisting}[style=cemdsp, caption={Eingabevalidierung an der Systemgrenze zur Rust-Engine.}, label={lst:validierung}]
+if delays.shape != pressures.shape:
+    raise ValueError(
+        f"delays/pressures shape mismatch: {delays.shape} vs {pressures.shape}"
+    )
+if delays.ndim != 1:
+    raise ValueError(f"delays/pressures must be 1D, got ndim={delays.ndim}")
+if delays.size == 0:
+    raise ValueError("no ray hits - cannot build impulse response")
+if (delays < 0).any():
+    raise ValueError("negative delay in input")
+if not np.isfinite(delays).all():
+    raise ValueError("delays contain NaN or Inf")
+if not np.isfinite(pressures).all():
+    raise ValueError("pressures contain NaN or Inf")
+if sample_rate <= 0:
+    raise ValueError(f"sample_rate must be positive, got {sample_rate}")
+\end{lstlisting}
+
+Hinter jeder dieser Prüfungen steht ein realistischer Defekt der vorgelagerten
+Stufen. Ungleich lange Listen deuten auf einen Serialisierungsfehler der Engine
+hin. Eine leere Trefferliste heißt, dass kein einziger Strahl den Empfänger
+erreicht hat, etwa weil Quelle oder Empfänger außerhalb der Raumgeometrie
+platziert wurden, und eine daraus konstruierte leere Impulsantwort fiele erst
+viel später als stilles Ausgabesignal auf. Heikler sind negative Verzögerungen.
+Physikalisch sind sie unmöglich, aber NumPy interpretiert negative Indizes
+kommentarlos als Zugriffe vom Array-Ende her, der Treffer landete also an einer
+scheinbar gültigen, nur eben falschen Position: kein Absturz, sondern ein
+subtil falsches Klangergebnis. Endlichkeit wird aus demselben Grund geprüft.
+Ein einzelner \texttt{NaN}-Wert aus einer fehlgeschlagenen Engine-Berechnung
+rutscht unbemerkt durch den Vorzeichentest, denn jeder Vergleich mit
+\texttt{NaN} ergibt \texttt{False}, und lieferte bei der Rundung zu
+Abtastindizes ein undefiniertes Ergebnis.
+
+Zwei weitere Prüfungen sitzen eine Ebene höher in \texttt{convolve}: die
+Validierung des Dictionary-Schemas aus Listing~\ref{lst:schema} über eine
+gezielt abgefangene \texttt{KeyError}/\texttt{TypeError} und der Vergleich der
+Abtastrate der Impulsantwort mit der des Trockensignals. Weichen die Raten
+voneinander ab, bricht die Verarbeitung ab, denn eine Faltung über
+inkonsistente Zeitraster stauchte oder dehnte sämtliche Verzögerungen um den
+Ratenquotienten. Der Hall wäre hörbar verstimmt.
+
+%----------------------------------------------------------------------
+\subsection{Faltung des Trockensignals}
+\label{subsec:faltung}
+
+\subsubsection{Anforderungen und Aufwandsabschätzung}
+\label{subsubsec:aufwand}
+
+
+Das verhallte Ausgangssignal ergibt sich aus der zeitdiskreten Faltung des
+Trockensignals $x[n]$ der Länge N mit der diskreten Impulsantwort $h[i]$ der Länge $M$.
+Für die Implementierung zählen vor allem zwei Eigenschaften der Operation,
+Ergebnislänge und Rechenaufwand. Das vollständige Faltungsprodukt umfasst
+$N + M - 1$ Samples, und genau diese Länge gibt der Modus \texttt{mode="full"}
+zurück. Nur so überlebt der Nachhallschwanz, der nach dem Ende des
+Trockensignals noch ausklingt; ein beschnittener Modus wie \texttt{"same"}
+würde ihn hörbar kappen. Für ein Sekunden-Signal bei $44{,}1$~kHz und die
+Impulsantwort aus Abbildung~\ref{fig:ir-stem} sind das
+$44100 + 19842 - 1 = 63941$ Samples, rund $1{,}45$~s Audio.
+
+Der Rechenaufwand ist die eigentliche Entwurfsfrage.
+
+Die direkte Auswertung der Faltungssumme erfordert für jeden Ausgabewert bis zu $\min(N,M)$ Multiplikationen und Additionen,
+was einer Gesamtkomplexität von $\mathcal{O}(N \cdot M)$ entspricht.
+Schon der genannte Fall kostet damit
+$44100 \cdot 19842 \approx 8{,}8 \cdot 10^{8}$
+Multiply-Accumulate-Operationen für eine einzige Sekunde Audio, und bei einer
+Impulsantwort von einer Sekunde Länge sind es knapp $2 \cdot 10^{9}$. Die
+schnelle Faltung über die FFT transformiert stattdessen beide Signale,
+multipliziert spektral und transformiert zurück (Oppenheim \& Schafer, 2010),
+Komplexität $\mathcal{O}\bigl((N + M)\log(N + M)\bigr)$. Für
+$N + M - 1 = 88199$ genügt eine FFT-Länge von $2^{17} = 131072$. Aus Milliarden
+Operationen werden einige Millionen. In dieser Größenordnung liegen auch die
+Messwerte in Abschnitt~\ref{subsubsec:benchmark}.
+
+\subsubsection{Overlap-Add und die Wahl von \texttt{oaconvolve}}
+\label{subsubsec:oa}
+
+SciPy bietet für die schnelle Faltung zwei Kandidaten:
+\texttt{signal.fftconvolve}, das beide Signale in voller Länge transformiert,
+und \texttt{signal.oaconvolve}, die Overlap-Add-Umsetzung (Oppenheim \&
+Schafer, 2010; Virtanen et al., 2020). Overlap-Add zerlegt das lange
+Eingangssignal in Blöcke, faltet jeden Block per FFT mit der Impulsantwort und
+addiert die überlappenden Blockergebnisse zum Gesamtsignal. Entscheidend ist,
+dass sich die FFT-Länge dabei nach der Impulsantwort richtet und nicht nach dem
+Eingangssignal; die Blocklänge wählt SciPy intern so, dass der Gesamtaufwand
+minimal wird. Praktisch bringt das zweierlei. Der Speicherbedarf der
+Transformationen hängt nicht mehr von der Länge des Eingangssignals ab, was
+bei langen Audiodateien zählt. Und bei stark unterschiedlich langen Operanden,
+kurze Impulsantwort gegen potenziell langes Musiksignal, dem Normalfall dieser
+Anwendung, ist Overlap-Add asymptotisch günstiger, näherungsweise
+$\mathcal{O}(N \log M)$ statt $\mathcal{O}\bigl((N+M)\log(N+M)\bigr)$.
+
+Gemessen macht das bei den hier untersuchten Signallängen keinen Unterschied,
+beide FFT-Varianten liefern praktisch identische Laufzeiten
+(Tabelle~\ref{tab:benchmark}). Die Entscheidung für \texttt{oaconvolve}
+sichert also weniger den Ist-Zustand ab als das Skalierungsverhalten: Der
+Dienst soll auch mehrminütige Aufnahmen falten, ohne dass Laufzeit oder
+Speicher zum Problem werden. Und wo die Operanden für eine blockweise
+Zerlegung zu kurz sind, fällt \texttt{oaconvolve} intern ohnehin auf
+\texttt{fftconvolve} zurück.
+
+\subsubsection{Laufzeit-Benchmark}
+\label{subsubsec:benchmark}
+
+Zur Absicherung der Algorithmuswahl wurde die Faltung eines Trockensignals
+von einer Sekunde Länge ($N = 44100$ Samples) mit Impulsantworten wachsender
+Länge vermessen, jeweils für die direkte Faltung (\texttt{np.convolve}), für
+\texttt{fftconvolve} und für \texttt{oaconvolve}. Die Messwerte stehen in
+Tabelle~\ref{tab:benchmark}; Abbildung~\ref{fig:conv-benchmark} trägt sie
+logarithmisch auf.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Laufzeiten der Faltungsvarianten für ein Trockensignal von
+        $1$~s bei $f_s = 44{,}1$~kHz in Abhängigkeit der IR-Länge $M$.}
+    \label{tab:benchmark}
+    \begin{tabular}{r r r r r r}
+        \toprule
+        $M$ [Samples] & $M / f_s$ [s] & direkt [ms] & \texttt{fftconvolve} [ms] & \texttt{oaconvolve} [ms] & Speedup \\
+        \midrule
+        2205  & 0,05 & 17,5  & 0,5 & 0,5 & 37 \\
+        4410  & 0,10 & 31,8  & 0,6 & 0,6 & 57 \\
+        8820  & 0,20 & 64,2  & 0,5 & 0,6 & 111 \\
+        22050 & 0,50 & 157,3 & 0,7 & 0,7 & 232 \\
+        44100 & 1,00 & 312,5 & 1,0 & 1,0 & 317 \\
+        \bottomrule
+    \end{tabular}
+
+    \smallskip
+    {\footnotesize Speedup aus den ungerundeten Rohmesswerten berechnet.}
+\end{table}
+
+Die Messreihe bestätigt die Aufwandsanalyse. Bei der direkten Faltung
+verdoppelt eine Verdopplung von $M$ in guter Näherung die Laufzeit, von
+$17{,}5$~ms bei $M = 2205$ bis $312{,}5$~ms bei $M = 44100$, also lineares
+Wachstum. Die beiden FFT-Varianten kümmert die IR-Länge dagegen kaum. Sie
+bleiben über den gesamten Messbereich zwischen $0{,}5$ und $1{,}0$~ms, weil
+ihr nur logarithmisch wachsender Aufwand bei diesen Größenordnungen von
+Konstanten wie Speicherbandbreite und FFT-Planung dominiert wird. Entsprechend
+klettert der Speedup mit der IR-Länge von Faktor $37$ auf Faktor $317$. Selbst
+der volle Sekunden-Nachhall kostet damit rund eine Millisekunde Rechenzeit pro
+Sekunde Audio; die Faltung ist im Gesamtsystem kein Engpass. Den Takt der
+Pipeline gibt die Strahlverfolgung in der Rust-Engine vor.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{kapitel7/conv_benchmark}
+    \caption{Laufzeit der drei Faltungsvarianten (logarithmische
+    Millisekunden-Achse) über der IR-Länge. Die direkte Faltung
+        (\texttt{np.convolve}) wächst linear mit $M$, während
+        \texttt{fftconvolve} und \texttt{oaconvolve} nahezu konstant bleiben.}
+    \label{fig:conv-benchmark}
+\end{figure}
+
+\subsubsection{Messumgebung und Reproduzierbarkeit}
+\label{subsubsec:messumgebung}
+
+Die Messwerte aus Tabelle~\ref{tab:benchmark} entstanden unter kontrollierten
+Bedingungen. Als Trockensignal dient eine Sekunde weißes Rauschen bei
+$f_s = 44{,}1$~kHz; die Impulsantworten sind Zufallsrauschen wachsender Länge,
+damit keine der Varianten von Nullwerten oder besonderer Struktur der
+Operanden profitiert. Gemessen wird mit \texttt{time.perf\_counter}, dem
+Monotonzeitgeber mit der höchsten verfügbaren Auflösung der
+Python-Standardbibliothek. Für die beiden FFT-Verfahren zählt der Bestwert aus
+drei Läufen, das unterdrückt Ausreißer durch konkurrierende Prozesse und
+Cache-Effekte. Die direkte Faltung läuft wegen ihrer deutlich längeren
+Laufzeit pro Konfiguration nur einmal. Bei Messwerten im dreistelligen
+Millisekundenbereich reicht das.
+
+Ausgeführt wurden die Messungen mit CPython~3.14.4, NumPy~2.4.4 und
+SciPy~1.17.1.
+Obwohl absolute Ausführungszeiten hardwareabhängig sind, belegt dieser Benchmark das zugrundeliegende Skalierungsverhalten.
+Die Gegenüberstellung von linearem und nahezu konstantem Wachstum validiert die theoretischen Aufwandsklassen plattformunabhängig.
+
+
+\subsubsection{Mehrkanalverarbeitung}
+\label{subsubsec:mehrkanal}
+
+
+Das Modul zum Einlesen der Audiodaten liefert Mono-Material als eindimensionales Array und
+Stereo- oder Mehrkanalmaterial als zweidimensionales Array der Form
+$(\text{Samples} \times \text{Kanäle})$.
+Die Faltung behandelt beide Fälle explizit:
+
+\begin{lstlisting}[style=cemdsp, caption={Mono- und Mehrkanal-Faltung in \texttt{convolve}.}, label={lst:mehrkanal}]
+if dry_audio.ndim == 1:
+    wet = signal.oaconvolve(dry_audio, ir, mode="full")
+elif dry_audio.ndim == 2:
+    channels = [
+        signal.oaconvolve(dry_audio[:, c], ir, mode="full")
+        for c in range(dry_audio.shape[1])
+    ]
+    wet = np.stack(channels, axis=1)
+else:
+    raise ValueError(f"dry_audio must be 1D or 2D, got ndim={dry_audio.ndim}")
+\end{lstlisting}
+
+Jeder Kanal wird mit derselben Impulsantwort gefaltet. Die Ergebnisse werden
+anschließend über \texttt{np.stack} wieder zum Kanal-Layout des Eingangs
+zusammengesetzt. Die Kanäle sind dabei vollständig unabhängig, denn die Engine
+simuliert genau eine Empfängerposition und liefert somit eine gemeinsame
+Impulsantwort für alle Kanäle. Ein Stereo-Eingang bleibt ein Stereo-Ausgang,
+dessen beide Kanäle denselben Raum „hören“. Echtes binaurales Rendering mit
+richtungsabhängig verschiedenen Impulsantworten pro Ohr läge außerhalb des
+Projektumfangs und würde zwei Empfänger in der Engine voraussetzen.
+Höherdimensionale Arrays weist die Funktion als Schnittstellenfehler zurück.
+
+\subsubsection{Numerik und Schnittstellenvertrag}
+\label{subsubsec:numerik}
+
+Intern rechnet der Faltungskern durchgängig in \texttt{float64}. Die
+Impulsantwort wird bereits in doppelter Genauigkeit akkumuliert
+(Listing~\ref{lst:build-ir}). Bei der Summation vieler kleiner Druckbeiträge und
+erst recht bei der nachgelagerten Filterbank aus
+Abschnitt~\ref{subsec:material} sollen sich Rundungsfehler nicht aufaddieren.
+Erst das fertige Ergebnis wird mit \texttt{wet.astype(np.float32)} auf einfache
+Genauigkeit reduziert. Das ist das übliche Format für Fließkomma-Audiodateien,
+dessen relative Auflösung von etwa $10^{-7}$ weit unterhalb jeder Hörschwelle
+liegt.
+
+Zum Vertrag der Funktion gehört ausdrücklich, dass das Ergebnis roh und
+unnormalisiert zurückgegeben wird. Die Faltung summiert die Beiträge vieler
+Reflexionen, ihr Ausgang kann den Wertebereich $[-1, 1]$ deshalb ohne Weiteres
+verlassen. Das Beispiel in Abbildung~\ref{fig:dry-wet} zeigt einen solchen
+Pegelzuwachs.
+Die Entscheidung über eine finale Normalisierung der Pegel wird nicht im Faltungskern,
+sondern im nachgelagerten Export-Modul \texttt{write\_wav} getroffen.
+ Diese Trennung hält
+die Verantwortlichkeiten sauber.
+Der Kern berechnet das mathematisch korrekte Faltungsprodukt, die I/O-Schicht sorgt für ein clippingfreies Dateiformat.
+Würde stattdessen schon in \texttt{convolve} normalisiert, ginge die
+Pegelrelation zwischen verschiedenen Läufen verloren und ein Vergleich
+unterschiedlicher Räume oder Materialien am Ausgangssignal wäre verfälscht.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{kapitel7/dry_wet}
+    \caption{Wirkung der Faltung im Zeitbereich. Oben das trockene
+    Eingangssignal, ein $440$-Hz-Ton mit Abkling-Hüllkurve; unten das mit
+    der Impulsantwort aus Abbildung~\ref{fig:ir-stem} gefaltete Signal.
+    Der Nachhall verlängert das Signal hörbar über das Ende des trockenen
+    Tons hinaus.}
+    \label{fig:dry-wet}
+\end{figure}
+
+\subsubsection{Verifikation über Invarianten}
+\label{subsubsec:faltung-verifikation}
+
+Analog zum Material-Selbsttest aus
+Abschnitt~\ref{subsubsec:material-verifikation} lassen sich auch
+IR-Konstruktion und Faltung an zwei exakten Invarianten prüfen. Die erste ist
+die Massenerhaltung. Da \texttt{np.add.at} jeden Druckwert genau einmal addiert,
+gilt unabhängig von Rundung und Index-Kollisionen exakt
+\[
+    \sum_{i=0}^{M-1} h[i] \;=\; \sum_{j} p_j .
+\]
+Die Diskretisierung verschiebt Beiträge also höchstens auf der Zeitachse, erzeugt
+oder vernichtet aber keine. Jede Verletzung dieser Gleichheit wiese unmittelbar
+auf einen Akkumulationsfehler hin. Die zweite Invariante ist die
+Dirac-Identität der Faltung. Für den Einheitsimpuls $h[i] = \delta[i]$, also
+einen einzelnen Treffer mit $p = 1$ bei $\tau = 0$, gilt
+\[
+    x[n] * \delta[n] \;=\; x[n].
+\]
+Das Trockensignal muss die Faltung unverändert passieren (Neutralität der
+Faltung). Beide Invarianten sind mit wenigen Zeilen NumPy prüfbar und sichern
+die Kernpfade von \texttt{build\_impulse\_response} und \texttt{convolve} gegen
+Regressionen ab.
+
+%----------------------------------------------------------------------
+\subsection{Frequenzabhängige Materialdämpfung}
+\label{subsec:material}
+
+\subsubsection{Motivation und Abgrenzung}
+\label{subsubsec:material-motivation}
+
+Reale Oberflächen absorbieren Schall frequenzabhängig. Ein Teppichboden
+absorbiert hohe Frequenzen um ein Vielfaches stärker als tiefe, eine Betonwand
+reflektiert nahezu breitbandig (Kuttruff, 2016). Ein Raum mit Teppich klingt
+deshalb nicht einfach leiser nach, sondern dumpfer. Die Höhen des Nachhalls
+klingen zuerst ab. Die Rust-Engine bildet diesen Effekt nicht ab. Wie in
+Abschnitt~2.1 beschrieben, reduziert sie die Absorption an jeder Wand auf einen
+einzigen skalaren Faktor und liefert pro Treffer nur den Restdruck $p_j$. Welche
+Frequenzanteile auf dem Weg verloren gingen, ist an dieser Systemgrenze bereits
+ausgelöscht.
+Eine aus solchen Treffern gebaute Impulsantwort ist zwangsläufig spektral neutral.
+Ohne frequenzabhängige Dämpfung besäße der simulierte Nachhall unabhängig von der Raumausstattung ein spektral neutrales Klangprofil.
+
+
+Der hier dokumentierte Beitrag setzt deshalb auf der Signalverarbeitungsseite
+an. \texttt{apply\_material\_absorption} formt die bereits konstruierte
+Impulsantwort nachträglich so um, als hätte die Absorption frequenzabhängig
+stattgefunden. Die Abgrenzung zu Abschnitt~2.1 ist damit präzise. Dort steht die
+physikalische Modellierung der Absorption innerhalb der Strahlverfolgung
+(skalarer Restdruck pro Treffer). Hier geht es um die frequenzbandweise
+Rekonstruktion des Materialklangs im Python-Dienst, als reine Nachverarbeitung
+der Impulsantwort vor der Faltung.
+
+\subsubsection{Materialdatenbank}
+\label{subsubsec:materialdb}
+
+Datengrundlage ist die Datei \texttt{materials.json}, die im Rust-Service liegt
+und von beiden Diensten gelesen wird. Diese Ablage ist eine
+Architekturentscheidung. Strahlverfolgung und Signalverarbeitung nutzen dieselben
+Koeffizienten aus derselben Datei. Es gibt eine zentrale Datenquelle (single
+source of truth) und kein Risiko, dass die Datenbestände der beiden Dienste
+auseinanderlaufen. Jedes Material ist durch sechs Oktavband-Absorptionskoeffizienten
+$\alpha_b$ zu den Mittenfrequenzen $125$, $250$, $500$, $1000$, $2000$ und
+$4000$~Hz sowie einen Streukoeffizienten beschrieben. Die Koeffizienten
+orientieren sich an tabellierten raumakustischen Messwerten (Kuttruff, 2016).
+Tabelle~\ref{tab:materials} zeigt den vollständigen Datenbestand.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Materialdatenbank \texttt{materials.json}:
+    Oktavband-Absorptionskoeffizienten $\alpha_b$ und Streukoeffizient $s$.}
+    \label{tab:materials}
+    \begin{tabular}{l l r r r r r r r}
+        \toprule
+        Material & Bezeichnung & \multicolumn{6}{c}{$\alpha_b$ bei Mittenfrequenz [Hz]} & $s$ \\
+        \cmidrule(lr){3-8}
+        & & 125 & 250 & 500 & 1000 & 2000 & 4000 & \\
+        \midrule
+        \texttt{concrete}        & Beton         & 0,02 & 0,03 & 0,03 & 0,03 & 0,04 & 0,07 & 0,05 \\
+        \texttt{brick}           & Ziegel        & 0,01 & 0,02 & 0,02 & 0,03 & 0,03 & 0,04 & 0,05 \\
+        \texttt{glass}           & Glas          & 0,08 & 0,04 & 0,03 & 0,03 & 0,02 & 0,02 & 0,05 \\
+        \texttt{wood}            & Holz          & 0,18 & 0,12 & 0,10 & 0,09 & 0,08 & 0,07 & 0,10 \\
+        \texttt{carpet}          & Teppich       & 0,08 & 0,24 & 0,57 & 0,69 & 0,71 & 0,73 & 0,40 \\
+        \texttt{curtain}         & Vorhang       & 0,30 & 0,45 & 0,65 & 0,56 & 0,59 & 0,71 & 0,50 \\
+        \texttt{acoustic\_panel} & Akustikpaneel & 0,46 & 0,93 & 1,00 & 1,00 & 1,00 & 1,00 & 0,50 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Die Tabelle zeigt zwei charakteristische Materialklassen. Harte, glatte
+Oberflächen (Beton, Ziegel, Glas) absorbieren in allen Bändern höchstens wenige
+Prozent der Energie. Glas kehrt das Profil sogar leicht um, da seine
+Plattenresonanz tiefe Frequenzen etwas stärker dämpft als hohe. Poröse und
+textile Materialien (Teppich, Vorhang, Akustikpaneel) zeigen das gegenteilige
+Verhalten mit stark ansteigender Absorption zu hohen Frequenzen. Das
+Akustikpaneel erreicht ab $500$~Hz den Maximalwert $\alpha_b = 1{,}0$, absorbiert
+dort also modellhaft vollständig. Der Streukoeffizient $s$ wird ausschließlich
+von der Strahlverfolgung in der Rust-Engine ausgewertet und hier nur der
+Vollständigkeit halber gelistet.
+
+Das Laden der Datei kapselt eine kleine Hilfsfunktion, die zwei Details regelt.
+Zum einen ist sie mit \texttt{functools.lru\_cache(maxsize=1)} dekoriert, sodass
+die JSON-Datei pro Prozess genau einmal gelesen und geparst wird, auch wenn
+viele Impulsantworten nacheinander geformt werden. Zum anderen validiert sie die
+Datenbank an der Systemgrenze. Für jedes Material muss die Zahl der
+Absorptionskoeffizienten exakt der Zahl der Mittenfrequenzen entsprechen,
+andernfalls schlägt das Laden mit einer benannten Fehlermeldung fehl. Ein
+Material mit fünf statt sechs Bändern ist ein naheliegender Pflegefehler in einer
+von Hand editierten JSON-Datei. Er wird so sofort erkannt, statt später ein Band
+stummzuschalten.
+
+\subsubsection{Das Reflexionszahl-Modell}
+\label{subsubsec:reflexionsmodell}
+
+Das Dämpfungsmodell beruht auf einer statistischen Überlegung aus der
+geometrischen Raumakustik. Ein Schallanteil, der zum Zeitpunkt $t$ am Empfänger
+eintrifft, hat bis dahin die Strecke $c \cdot t$ zurückgelegt. In einem Raum mit
+mittlerer freier Weglänge $\bar{\ell}$ zwischen zwei Wandkontakten, für konvexe
+Räume gilt näherungsweise $\bar{\ell} = 4V/S$ mit Raumvolumen $V$ und
+Gesamtoberfläche $S$ (Kuttruff, 2016), hat er dabei im Mittel
+\[
+    n(t) \;=\; \frac{c \cdot t}{\bar{\ell}} \;=\; \frac{t}{\tau_{\mathrm{mfp}}},
+    \qquad \tau_{\mathrm{mfp}} = \frac{\bar{\ell}}{c},
+\]
+Reflexionen erfahren. Die Größe $\tau_{\mathrm{mfp}}$ ist die mittlere Zeit
+zwischen zwei Wandkontakten. Der Implementierungs-Default
+$\tau_{\mathrm{mfp}} = 0{,}02$~s entspricht bei $c = 343$~m/s einer freien
+Weglänge von knapp $6{,}9$~m, also einem größeren Raum.
+
+Bei jedem Wandkontakt verbleibt im Oktavband $b$ der Anteil $(1 - \alpha_b)$
+der Energie. Nach $n(t)$ Reflexionen ist der verbleibende Anteil demnach
+\[
+    g_b(t)
+    \;=\; \bigl(1 - \alpha_b\bigr)^{\,n(t)}
+    \;=\; \bigl(1 - \alpha_b\bigr)^{\,t / \tau_{\mathrm{mfp}}}.
+\]
+Jedes Band klingt also exponentiell ab, und zwar umso schneller, je größer sein
+Absorptionskoeffizient ist. Die Exponentialform wird in logarithmischer
+Schreibweise deutlicher:
+\begin{align*}
+    g_b(t) &= \exp\!\Bigl(\frac{t}{\tau_{\mathrm{mfp}}}\,
+    \ln\bigl(1 - \alpha_b\bigr)\Bigr),
+\end{align*}
+eine abklingende Exponentialfunktion mit bandabhängiger Zeitkonstante. Setzt man
+die $-60$-dB-Schwelle der klassischen Nachhallzeit an, also
+$g_b(T_{60,b}) = 10^{-3}$, folgt
+\[
+    T_{60,b} \;=\; \tau_{\mathrm{mfp}} \cdot
+    \frac{\ln 10^{-3}}{\ln\bigl(1 - \alpha_b\bigr)}.
+\]
+Konkrete Zahlen zeigen die Spannweite des Modells. Für Beton bei $2$~kHz
+($\alpha_b = 0{,}04$) ergibt sich $T_{60} \approx 3{,}4$~s. Für Teppich im selben
+Band ($\alpha_b = 0{,}71$) sind es nur $T_{60} \approx 0{,}11$~s. Im tiefsten
+Band bei $125$~Hz hält der Teppich-Hall mit $\alpha_b = 0{,}08$ dagegen etwa
+$1{,}7$~s durch. Genau dieses Auseinanderlaufen der bandweisen Nachhallzeiten
+erzeugt den charakteristischen, über die Zeit dunkler werdenden Klang bedämpfter
+Räume. Ein Zwischenwert verdeutlicht die Dynamik. Nach $t = 0{,}2$~s, also
+$n = 10$ mittleren Reflexionen, ist das $2$-kHz-Band bei Beton noch mit Faktor
+$0{,}96^{10} \approx 0{,}66$ vertreten. Bei Teppich ist es mit
+$0{,}29^{10} \approx 4 \cdot 10^{-6}$ praktisch verschwunden.
+
+Das Modell ist statistisch angelegt. Es beschreibt nicht die tatsächliche
+Reflexionsfolge eines einzelnen Strahls, sondern das mittlere Verhalten aller
+Pfade gleicher Laufzeit, und es unterstellt ein einheitliches Material für den
+gesamten Raum. Beide Vereinfachungen und ihr Preis werden in
+Abschnitt~\ref{subsubsec:grenzen} diskutiert.
+
+\subsubsection{Oktavband-Filterbank}
+\label{subsubsec:filterbank}
+
+Um die bandweisen Hüllkurven $g_b(t)$ anwenden zu können, muss die Impulsantwort
+zunächst in ihre sechs Oktavbänder zerlegt werden. Die Bandgrenzen ergeben sich
+als geometrische Mittel benachbarter Mittenfrequenzen,
+$f_{\text{Grenze}} = \sqrt{f_b \cdot f_{b+1}}$, denn auf der logarithmischen
+Frequenzachse liegt die Grenze mittig zwischen den Bandmitten. Für die sechs
+Mittenfrequenzen aus Tabelle~\ref{tab:materials} entstehen so die Übergänge bei
+$177$, $354$, $707$, $1414$ und $2828$~Hz. Die Randbänder sind einseitig offen.
+Das $125$-Hz-Band wird als Tiefpass unterhalb $177$~Hz realisiert und fängt damit
+auch alle Frequenzen unterhalb seiner nominellen Bandmitte ein. Das $4$-kHz-Band
+wird als Hochpass oberhalb $2828$~Hz bis zur Nyquist-Frequenz realisiert. Ohne
+diese offenen Ränder gingen die Anteile unter $88$~Hz und über $5657$~Hz bei der
+Bandzerlegung schlicht verloren. Die Berechnung der Grenzen ist generisch über
+die Zahl der Mittenfrequenzen implementiert:
+
+\begin{lstlisting}[style=cemdsp, caption={Berechnung der Bandgrenzen und Bandfilterung.}, label={lst:filterbank}]
+def _octave_band_edges(centers: tuple[float, ...]) -> list[tuple[float | None, float | None]]:
+    """(low, high) Grenzfrequenz pro Band; None = offenes Ende (Tief-/Hochpass)."""
+    n = len(centers)
+    edges: list[tuple[float | None, float | None]] = []
+    for i in range(n):
+        low = None if i == 0 else (centers[i - 1] * centers[i]) ** 0.5
+        high = None if i == n - 1 else (centers[i] * centers[i + 1]) ** 0.5
+        edges.append((low, high))
+    return edges
+
+
+def _bandpass(x: np.ndarray, low: float | None, high: float | None, nyquist: float) -> np.ndarray:
+    if low is None:
+        sos = signal.butter(4, high / nyquist, btype="lowpass", output="sos")
+    elif high is None:
+        sos = signal.butter(4, low / nyquist, btype="highpass", output="sos")
+    else:
+        sos = signal.butter(4, [low / nyquist, high / nyquist], btype="bandpass", output="sos")
+    return signal.sosfiltfilt(sos, x)
+\end{lstlisting}
+
+Als Filtertyp kommen Butterworth-Filter vierter Ordnung zum Einsatz. Ihr maximal
+flacher Durchlassbereich färbt das Band nicht ein, und die Flankensteilheit
+vierter Ordnung trennt benachbarte Oktaven ausreichend, ohne durch extreme
+Polgüten numerisch heikel zu werden. Entworfen werden die Filter in der
+\texttt{sos}-Darstellung (second-order sections), die die Übertragungsfunktion
+als Kaskade von Biquads faktorisiert. Gegenüber der direkten Polynomform
+\texttt{(b, a)} ist diese Darstellung bei höheren Ordnungen und tiefen normierten
+Grenzfrequenzen deutlich robuster gegen Koeffizienten-Rundungsfehler. Genau
+solche Grenzfrequenzen erzeugt das $125$-Hz-Band bei $44{,}1$~kHz Abtastrate.
+
+Gefiltert wird mit \texttt{sosfiltfilt}, also vorwärts und rückwärts. Dieses
+Vorgehen ist für die vorliegende Anwendung wesentlich. Die
+Vorwärts-Rückwärts-Filterung hebt die Phasenverzerrung des Filters exakt auf
+(nullphasige Filterung), sodass jeder einzelne Abtastwert der Impulsantwort (Tap)
+nach der Bandzerlegung an seiner ursprünglichen Zeitposition bleibt. Eine kausale
+Einfachfilterung würde jedes Band um seine frequenzabhängige Gruppenlaufzeit
+verschieben, die Bänder gegeneinander verschmieren und insbesondere den
+Direktschall verzögern. Die Nichtkausalität von \texttt{filtfilt} ist hier
+unschädlich, denn die Impulsantwort liegt als vollständiges Array vor und wird
+offline verarbeitet. Als Nebeneffekt quadriert die doppelte Filterung den
+Betragsgang. Aus dem $-3$-dB-Punkt des Einzeldurchlaufs an der Bandgrenze wird
+effektiv $-6$~dB, also der halbe Amplitudenbeitrag. So ergänzen sich zwei
+benachbarte Bänder am Übergang näherungsweise zu eins, und die Rekonstruktion
+durch Aufsummieren der Bänder bleibt nahezu neutral.
+
+Abbildung~\ref{fig:filterbank} zeigt die Betragsfrequenzgänge der sechs Filter
+über der logarithmischen Frequenzachse. Gut erkennbar sind die lückenlose
+Abdeckung des Spektrums durch die offenen Randbänder, die Kreuzungspunkte an den
+geometrischen Bandgrenzen und die gleichmäßigen Flanken der
+Butterworth-Charakteristik.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{kapitel7/filterbank}
+    \caption{Betragsfrequenzgang der sechs Oktavband-Butterworth-Filter
+    vierter Ordnung über logarithmischer Frequenzachse, mit markierten
+    Mittenfrequenzen ($125$ bis $4000$~Hz) und $-3$-dB-Linie. Das unterste
+    Band ist als Tiefpass, das oberste als Hochpass ausgeführt.}
+    \label{fig:filterbank}
+\end{figure}
+
+\subsubsection{Implementierung}
+\label{subsubsec:material-implementierung}
+
+Die Funktion \texttt{apply\_material\_absorption} setzt Modell und Filterbank
+zusammen. Nach den Systemgrenzen-Prüfungen (bekanntes Material, positive
+Parameter) zerlegt sie die Impulsantwort bandweise, gewichtet jedes Band mit
+seiner Hüllkurve und summiert die Ergebnisse:
+
+\begin{lstlisting}[style=cemdsp, caption={Kern von \texttt{apply\_material\_absorption}.}, label={lst:material}]
+ir = np.asarray(ir, dtype=np.float64)
+nyquist = sample_rate / 2.0
+reflections = (np.arange(ir.size, dtype=np.float64) / sample_rate) / mean_free_path_s
+
+# sosfiltfilt braucht eine Mindestlaenge; zu kurze IRs nicht filtern.
+if ir.size <= 24:
+    return ir
+
+shaped = np.zeros_like(ir)
+for (low, high), alpha in zip(_octave_band_edges(centers), materials[material]):
+    band = _bandpass(ir, low, high, nyquist)
+    gain = np.power(max(1e-6, 1.0 - alpha), reflections)
+    shaped += band * gain
+return shaped
+\end{lstlisting}
+
+Das Array \texttt{reflections} enthält für jeden Sample-Index die mittlere
+Reflexionszahl $n(t) = t / \tau_{\mathrm{mfp}}$. Die Zeile \texttt{np.power(...)}
+wertet damit $g_b(t)$ für alle Zeitpunkte vektorisiert aus. Die geformte
+Impulsantwort ist mathematisch
+\[
+    h_{\text{shaped}}[i]
+    \;=\; \sum_{b=1}^{6} g_b\!\Bigl(\tfrac{i}{f_s}\Bigr) \cdot h_b[i],
+\]
+wobei $h_b$ das $b$-te Bandsignal der Zerlegung bezeichnet. Zwei
+Implementierungsdetails verdienen Erwähnung. Das erste ist die Klemmung
+\texttt{max(1e-6, 1.0 - alpha)}. Das Akustikpaneel erreicht in fünf Bändern
+$\alpha_b = 1{,}0$, womit die Basis der Potenz null würde. Die Klemme auf
+$10^{-6}$ hält die Basis strikt positiv und macht die Hüllkurve zu einem
+wohldefinierten, extrem schnellen Abfall statt einer harten Nullsetzung mit dem
+numerischen Randfall $0^0$ am Direktschall-Index. Das zweite Detail ist die
+Längenprüfung \texttt{ir.size <= 24}. Die Vorwärts-Rückwärts-Filterung polstert
+das Signal intern an beiden Rändern auf und verlangt dafür eine Mindestlänge, die
+von der Zahl der Biquad-Sektionen abhängt. Impulsantworten mit höchstens
+$24$~Samples, in der Praxis nur degenerierte Testfälle mit einer Handvoll Treffer
+direkt am Zeitnullpunkt, werden deshalb unverändert zurückgegeben, statt eine
+kryptische SciPy-Fehlermeldung auszulösen.
+
+In die Pipeline eingebunden ist die Dämpfung als optionaler Schritt zwischen
+IR-Konstruktion und Faltung. Der Parameter \texttt{material} von \texttt{convolve}
+ist standardmäßig \texttt{None}. Nur wenn ein Materialname übergeben wird,
+durchläuft die Impulsantwort die Filterbank:
+
+\begin{lstlisting}[style=cemdsp, caption={Einbindung in \texttt{convolve}: Materialdämpfung als optionaler Schritt.}, label={lst:einbindung}]
+ir = build_impulse_response(delays, pressures, sample_rate)
+
+if material is not None:
+    ir = apply_material_absorption(ir, sample_rate, material, mean_free_path_s)
+\end{lstlisting}
+
+Diese Anordnung ist auch eine Effizienzentscheidung. Die Filterbank verarbeitet
+die Impulsantwort (typisch einige zehntausend Samples) statt des gefalteten
+Signals (potenziell Millionen Samples). Filterung und Faltung sind lineare,
+zeitinvariante Operationen, das Ergebnis ist also identisch. Der Aufwand ist aber
+um das Längenverhältnis der Signale kleiner.
+
+\subsubsection{Der Parameter \texttt{mean\_free\_path\_s}}
+\label{subsubsec:mfp}
+
+Die mittlere Reflexionszeit $\tau_{\mathrm{mfp}}$ ist als Parameter
+\texttt{mean\_free\_path\_s} mit dem Default $0{,}02$~s exponiert und wird von
+\texttt{convolve} unverändert durchgereicht. Er ist der einzige freie Parameter
+des Modells und steuert, wie schnell die Materialabsorption über die Hallzeit
+greift. Kleine Werte bedeuten viele Wandkontakte pro Sekunde, also ein schnelles
+Auseinanderlaufen der Bänder und einen früh dumpf werdenden Hall, wie er zu
+kleinen Räumen passt. Große Werte strecken den Effekt. Die Raumgeometrie der
+Engine liegt dem Python-Dienst nicht direkt vor. Deshalb kann
+$\tau_{\mathrm{mfp}} = \bar{\ell}/c = 4V/(S\,c)$ vom Aufrufer passend zur
+simulierten Szene gesetzt werden. Der Default von $0{,}02$~s
+($\bar{\ell} \approx 6{,}9$~m) ist auf die in den Experimenten verwendeten,
+halligeren Räume abgestimmt. Der Parameter absorbiert zugleich die
+Restunsicherheit des statistischen Modells. Wer den gemessenen Nachhall eines
+konkreten Raums nachbilden will, stimmt in der Praxis diesen einen Wert ab, statt
+am Modell selbst zu drehen.
+
+\subsubsection{Verifikation}
+\label{subsubsec:material-verifikation}
+
+Das Modul enthält einen reproduzierbaren Selbsttest, der die zentrale
+Modellaussage prüft: Teppich muss die Höhen des Nachhalls stärker dämpfen als
+Beton. Der Test erzeugt mit festem Zufalls-Seed eine dichte Impulsantwort aus
+$2000$ Treffern, gleichverteilt über die ersten $0{,}5$~s. Er formt sie einmal
+mit \texttt{carpet} und einmal mit \texttt{concrete} und misst jeweils den
+Energieanteil oberhalb von $2$~kHz (Hochpass-Filterung, Verhältnis der
+Signalenergien). Das Ergebnis ist eindeutig. Beim Teppich verbleibt ein
+Energieanteil von $0{,}39$ oberhalb von $2$~kHz, beim Beton $0{,}71$. Eine
+Assertion erzwingt diese Ordnung. Kippte sie durch eine Regression, etwa
+vertauschte Bandkanten oder eine invertierte Hüllkurve, schlüge der Test fehl.
+Der feste Seed macht das Ergebnis über Läufe und Maschinen hinweg identisch.
+
+Abbildung~\ref{fig:material-spectrum} zeigt denselben Effekt im Spektrum.
+Aufgetragen ist das geglättete FFT-Betragsspektrum der materialgeformten
+Impulsantwort für beide Materialien. Unterhalb von etwa $500$~Hz verlaufen beide
+Kurven ähnlich, denn dort liegen die Absorptionskoeffizienten von Teppich
+($0{,}08$ bei $125$~Hz) und Beton ($0{,}02$) noch nah beieinander. Oberhalb von
+etwa $2$~kHz fällt das Teppich-Spektrum dagegen steil ab, während das
+Beton-Spektrum flach bleibt. Genau hier klaffen die Koeffizienten mit $0{,}71$
+gegen $0{,}04$ am weitesten auseinander. Das Spektrum bestätigt damit qualitativ,
+was der Energie-Selbsttest quantitativ misst.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{kapitel7/material_spectrum}
+    \caption{Geglättetes FFT-Betragsspektrum (relative dB) der
+    materialgeformten Impulsantwort für Teppich (\texttt{carpet}) und Beton
+        (\texttt{concrete}), mit markierter $2$-kHz-Linie. Das Teppich-Spektrum
+        fällt oberhalb von etwa $2$~kHz stark ab, das Beton-Spektrum bleibt
+        deutlich flacher; der Energieanteil oberhalb $2$~kHz beträgt $0{,}39$
+        (Teppich) gegenüber $0{,}71$ (Beton).}
+    \label{fig:material-spectrum}
+\end{figure}
+
+\subsubsection{Grenzen des Modells und Ausblick}
+\label{subsubsec:grenzen}
+
+Das Verfahren hat drei bewusste Vereinfachungen. Die gewichtigste ist die Annahme
+eines global einheitlichen Raummaterials. Die Hüllkurve $g_b(t)$ hängt nur von
+der Laufzeit eines Taps ab, nicht davon, welche Oberflächen der zugehörige Strahl
+tatsächlich getroffen hat. Ein Raum mit Teppichboden und Betondecke lässt sich
+damit nur als Mischmaterial annähern. Eine echte Trennung nach Oberfläche, also
+die Aussage „dieser Tap stammt von drei Teppich-Kontakten, jener von zwei
+Beton-Kontakten“, ist im Python-Dienst prinzipiell nicht rekonstruierbar, solange
+die Engine pro Treffer nur den skalaren Druck $p_j$ exportiert. Der konsequente
+nächste Schritt wäre ein bandweiser Druck-Export. Statt $p_j$ lieferte die Engine
+pro Treffer einen Vektor $p_{j,b}$ mit sechs Einträgen, in dem jede
+Wandinteraktion ihre bandweise Absorption bereits eingerechnet hat. Der
+Python-Dienst baute dann sechs Band-Impulsantworten direkt aus den Daten, die
+Filterbank bliebe für die Rekombination erhalten, und das statistische
+Reflexionszahl-Modell entfiele ersatzlos. Kapitel~7 führt diese Erweiterung im
+Ausblick an.
+
+Die zweite Vereinfachung ist statistischer Natur. $n(t) = t / \tau_{\mathrm{mfp}}$
+ersetzt die tatsächliche, pfadindividuelle Reflexionszahl durch ihren
+Erwartungswert. Für den dichten Nachhallschwanz, in dem sich viele Pfade gleicher
+Laufzeit überlagern, ist das eine gute Näherung. Für einzelne frühe Reflexionen,
+deren Pfad nur ein oder zwei Wandkontakte enthält, weicht die mittlere
+Reflexionszahl vom Einzelfall ab. Drittens wendet die Implementierung den
+Energie-Absorptionsgrad $(1 - \alpha_b)$ direkt auf die Amplitude des Bandsignals
+an. Streng energetisch wäre pro Reflexion der Amplitudenfaktor
+$\sqrt{1 - \alpha_b}$ anzusetzen. Der Unterschied entspricht exakt einer
+Verdopplung der wirksamen Reflexionszahl und lässt sich damit vollständig durch
+eine Verdopplung von $\tau_{\mathrm{mfp}}$ kompensieren. Da dieser Parameter
+ohnehin je Szene abgestimmt wird, wurde auf eine getrennte Wurzelbehandlung
+verzichtet. Alle drei Punkte sind Genauigkeits-, keine Korrektheitsfragen. Die
+qualitative Kernaussage des Modells, stärker absorbierende Bänder klingen
+schneller ab, bleibt in jedem Fall erhalten und ist durch den Selbsttest
+abgesichert.
+
+%----------------------------------------------------------------------
+\subsection{Zusammenfassung}
+\label{subsec:dsp-zusammenfassung}
+
+Dieses Kapitel hat den Faltungskern des Python-Dienstes dokumentiert, der aus den
+Strahl-Treffern der Rust-Engine ein verhalltes Audiosignal erzeugt. Die
+Konstruktion der Impulsantwort quantisiert jede Ankunftszeit auf das Abtastraster
+($i_j = \operatorname{round}(\tau_j f_s)$, maximaler Zeitfehler
+$11{,}34~\mu\mathrm{s}$ bei $44{,}1$~kHz) und akkumuliert gleichzeitige Treffer
+mit \texttt{np.add.at} korrekt, wo die gepufferte NumPy-Indizierung Energie
+verlöre. Alle Eingaben werden an der Systemgrenze zur Engine validiert, vom
+Dictionary-Schema über negative Verzögerungen bis zum Abtastraten-Vergleich.
+
+Für die Faltung fiel die Wahl auf \texttt{scipy.signal.oaconvolve} im Modus
+\texttt{"full"}. Das Overlap-Add-Verfahren verbindet die
+$\mathcal{O}(N \log M)$-Komplexität der schnellen Faltung mit einem von der
+Signallänge unabhängigen Speicherbedarf. Der Benchmark bestätigt die Entscheidung
+mit Speedups zwischen Faktor $37$ und $317$ gegenüber der direkten Faltung. Bei
+rund einer Millisekunde Rechenzeit pro Sekunde Audio ist die Faltung im
+Gesamtsystem kein Engpass. Mehrkanalmaterial wird kanalweise mit derselben
+Impulsantwort gefaltet, intern in \texttt{float64} gerechnet und als rohes,
+unnormalisiertes \texttt{float32}-Signal an den Export übergeben.
+
+Die frequenzabhängige Materialdämpfung schließt die Lücke, die der skalare
+Druck-Export der Engine hinterlässt. Auf Basis der gemeinsamen Materialdatenbank
+\texttt{materials.json} zerlegt eine Filterbank aus sechs nullphasigen
+Butterworth-Oktavbandfiltern die Impulsantwort, gewichtet jedes Band mit der aus
+dem Reflexionszahl-Modell hergeleiteten Hüllkurve
+$g_b(t) = (1 - \alpha_b)^{t/\tau_{\mathrm{mfp}}}$ und setzt sie wieder zusammen.
+Der Selbsttest belegt das erwartete Verhalten. Nach der Formung verbleibt beim
+Teppich nur ein Energieanteil von $0{,}39$ oberhalb von $2$~kHz, beim Beton
+$0{,}71$. Damit klingt ein Betonraum hell und lang nach, ein Teppichraum kurz und
+dunkel, obwohl beide aus derselben breitbandigen Trefferliste hervorgehen.
+Die dokumentierten Modellgrenzen, insbesondere die Annahme eines globalen Raummaterials, motivieren einen bandweisen Druck-Export $p_{j,b}$ als sinnvolle architektonische Weiterentwicklung.
+
+
+% =====================================================================
+% Literatur fuers globale Verzeichnis
+% ---------------------------------------------------------------------
+% Oppenheim, A. V. & Schafer, R. W. (2010): Discrete-Time Signal
+%   Processing. 3. Auflage, Pearson, Upper Saddle River, NJ.
+% Kuttruff, H. (2016): Room Acoustics. 6. Auflage, CRC Press,
+%   Boca Raton, FL.
+% Virtanen, P. et al. (2020): SciPy 1.0: Fundamental Algorithms for
+%   Scientific Computing in Python. Nature Methods 17, S. 261-272.
+% =====================================================================

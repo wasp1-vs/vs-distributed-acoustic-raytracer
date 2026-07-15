@@ -2,6 +2,8 @@
 
 
 % --- PAKETE ---
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{xcolor}
@@ -14,7 +16,7 @@
 \usepackage{booktabs}
 \usetikzlibrary{arrows.meta,positioning}
 \pgfplotsset{compat=1.18}
-
+\setlength{\emergencystretch}{3em}
 % --- CODE LISTINGS CONFIG ---
 \lstset{
     breaklines=true,
@@ -37,6 +39,8 @@
 }
 
 \begin{document}
+
+
 
     \include{intro/intro}
 
@@ -67,11 +71,17 @@
 
 
     \include{kapitel6/kapitel6}
-% ==========================================
-% KAPITEL 7: REFLEXION & FAZIT
-% ==========================================
+    %\include{cem/Kapitel5_DSP_Cem}
+
     \include{kapitel7/kapitel7}
 
+
+
+    % ==========================================
+% KAPITEL 8: REFLEXION & FAZIT
+% ==========================================
+
+    \include{kapitel8/kapitel8}
 % ==========================================
 % OUTRO: QUELLCODE
 % ==========================================
