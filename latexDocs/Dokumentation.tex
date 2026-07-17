@@ -71,7 +71,6 @@
     Das stochastische Raytracing erfasst beide Phasen natürlich, da sowohl kurze Direktpfade
     als auch komplexe Mehrfachreflexionen in der Impulsantwort akkumuliert werden.
 
-
     \subsection{Monte-Carlo-Integration und Raytracing}
     \label{subsec:montecarlo}
 
@@ -108,7 +107,6 @@
     $N$ Stichproben direkt auf beliebig viele CPU-Kerne aufteilen
     (siehe Kapitel~\ref{sec:concurrency}).
 
-
     \subsection{Digitale Signalverarbeitung: Impulsantwort und schnelle Faltung}
     \label{subsec:dsp}
 
@@ -142,7 +140,7 @@
     Das \emph{Faltungstheorem} der Fouriertransformation besagt, dass eine Faltung im
     Zeitbereich einem punktweisen Produkt im Frequenzbereich entspricht:
     \[Y(f) = \mathcal{F}\{x\}(f) \cdot \mathcal{F}\{h\}(f)
-      \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
+    \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
     Durch den Einsatz der Fast Fourier Transform (FFT) sinkt die Komplexität auf
     $\mathcal{O}((N+M)\log(N+M))$, was bei großen $M$ einen massiven Speedup bedeutet.
 
@@ -297,7 +295,7 @@
     eine \(x\)-, \(y\)- und \(z\)-Koordinate:
 
     \[
-    P = (x,y,z)
+        P = (x,y,z)
     \]
 
     Diese Erweiterung betrifft insbesondere die Position des Lautsprechers, die
@@ -897,7 +895,6 @@
     Konfiguration und Export klar voneinander getrennt sind.
 
 
-
     \section{Hochleistungs-Nebenläufigkeit und Datenparallelität}
     \label{sec:concurrency}
 
@@ -981,6 +978,8 @@ walls: &Vec<Wall>
 
 
     \newpage
+
+
     \section{Systemarchitektur und Pipeline-Orchestrierung}
     \label{sec:systemarchitektur}
 
@@ -1001,15 +1000,15 @@ walls: &Vec<Wall>
     stellt die geladenen Daten anschließend als Python-Dictionary bereit.
 
     \[
-    \text{Python-Pipeline}
-    \rightarrow
-    \texttt{rust\_runner.py}
-    \rightarrow
-    \text{Rust-Binary}
-    \rightarrow
-    \texttt{ir\_output.json}
-    \rightarrow
-    \text{Python-Dictionary}
+        \text{Python-Pipeline}
+        \rightarrow
+        \texttt{rust\_runner.py}
+        \rightarrow
+        \text{Rust-Binary}
+        \rightarrow
+        \texttt{ir\_output.json}
+        \rightarrow
+        \text{Python-Dictionary}
     \]
 
     Diese Architektur trennt die Zuständigkeiten klar voneinander.
@@ -1176,7 +1175,8 @@ walls: &Vec<Wall>
     gesammelt. Dadurch können \texttt{stdout} und \texttt{stderr} im Fehlerfall
     in die Fehlermeldung übernommen werden.
 
-    Der Parameter \texttt{text=True} sorgt dafür, dass diese Ausgaben als Text und nicht als Byte-Daten verarbeitet werden.
+    Der Parameter \texttt{text=True} sorgt dafür, dass diese Ausgaben als Text
+    und nicht als Byte-Daten verarbeitet werden.
 
     \subsection{Fehlerbehandlung und JSON-Ingestion}
     \label{subsec:error-handling-json}
@@ -1358,7 +1358,7 @@ walls: &Vec<Wall>
 
 
     \section{Leistungsoptimierungen und Profiling}
-        \label{sec:optimizations}
+    \label{sec:optimizations}
     Benchmarking the compiled binary (utilizing Rust's \texttt{--release} flag for maximum LLVM optimization)
     revealed significant bottlenecks and subsequent optimization opportunities within the parallelized architecture.
 
