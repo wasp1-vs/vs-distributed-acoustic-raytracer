@@ -3,6 +3,11 @@
 \usepackage{amsmath}
 \usepackage{listings}
 \usepackage{amsopn}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc}
+\renewcommand{\figurename}{Abbildung}
+
 
 \lstdefinelanguage{Rust}{
     morekeywords={fn, let, mut, pub, struct, use, mod, if, else, for, return, Some, None},
@@ -295,12 +300,13 @@
     eine \(x\)-, \(y\)- und \(z\)-Koordinate:
 
     \[
-        P = (x,y,z)
+    P = (x,y,z)
     \]
 
     Diese Erweiterung betrifft insbesondere die Position des Lautsprechers, die
     Position des Mikrofons, die Startpunkte der Rays, deren Richtungsvektoren
     sowie die Reflexionspunkte an den Raumflächen.
+
 
     \subsubsection{Neue 3D-Datenstrukturen: \texttt{Ray} und \texttt{Triangle}}
     \label{subsubsec:ray-triangle}
@@ -349,6 +355,7 @@
     abgeschwächt wird. Damit enthält die Struktur neben der geometrischen
     Beschreibung auch eine akustische Eigenschaft.
 
+
     \subsubsection{Ablösung des 2D-Segment-Schnitts}
     \label{subsubsec:replace-2d-intersection}
 
@@ -366,6 +373,7 @@
 
     Dadurch kann die Simulation nicht nur einfache rechteckige Räume, sondern
     grundsätzlich auch komplexere polygonale Geometrien verarbeiten.
+
 
     \subsubsection{Aufbau des 3D-Raums aus Dreiecken}
     \label{subsubsec:room-triangles}
@@ -442,6 +450,7 @@
 
     Bei den Wänden bleibt jeweils eine Koordinate konstant, während die beiden
     anderen Koordinaten die jeweilige Wandfläche aufspannen.
+
 
     \subsubsection{Möller-Trumbore-Algorithmus}
     \label{subsubsec:moller-trumbore}
@@ -540,6 +549,7 @@
     Diese Prüfung verhindert sogenannte Selbsttreffer, bei denen ein
     reflektierter Ray direkt wieder dieselbe Fläche trifft.
 
+
     \subsubsection{Reflexionsberechnung}
     \label{subsubsec:3d-reflection}
 
@@ -581,6 +591,70 @@
     Richtung normalisiert, damit sie weiterhin als Einheitsvektor verwendet werden
     kann.
 
+    Die geometrische Beziehung zwischen einfallendem Strahl,
+    Oberflächennormale und reflektiertem Strahl ist in
+    Abbildung~\ref{fig:reflection-side-view} dargestellt.
+
+    \begin{figure}[htbp]
+    \centering
+
+    \begin{tikzpicture}[
+        scale=1.1,
+        >=Latex,
+        rayin/.style={->, thick, blue},
+        rayout/.style={->, thick, green!60!black},
+        normal/.style={->, thick, red}
+    ]
+
+        % Dreiecksfläche in vereinfachter Seitenansicht
+        \draw[very thick] (-3,0) -- (3,0);
+        \node[below right=5pt] at (1.25,0) {Dreiecksfläche};
+
+        % Trefferpunkt
+        \fill (0,0) circle (2pt);
+        \node[below=6pt] at (0,0) {Trefferpunkt};
+
+        % Oberflächennormale
+        \draw[normal] (0,0) -- (0,3);
+        \node[red, right=5pt] at (0,2.35)
+        {Normale $\vec{N}$};
+
+        % Einfallender Strahl
+        \draw[rayin] (-3,2.2) -- (0,0);
+        \node[blue] at (-2.15,1.55)
+        {einfallender Strahl};
+        \node[blue] at (-1.55,0.95)
+        {$\vec{d}$};
+
+        % Reflektierter Strahl
+        \draw[rayout] (0,0) -- (3,2.2);
+        \node[green!60!black] at (2.15,1.55)
+        {reflektierter Strahl};
+
+        % Winkelbögen
+        \draw (0,0.75)
+        arc[start angle=90, end angle=143.7, radius=0.75];
+
+        \draw (0,0.75)
+        arc[start angle=90, end angle=36.3, radius=0.75];
+
+        % Winkelbeschriftungen
+        \node at (-0.43,0.95) {$\theta_i$};
+        \node at (0.43,0.95) {$\theta_r$};
+
+        % Reflexionsgesetz
+        \node at (0,-1.05) {$\theta_i = \theta_r$};
+
+    \end{tikzpicture}
+
+    \caption{
+        Vereinfachte Seitenansicht der Reflexion an einer Dreiecksfläche.
+        Einfallswinkel \(\theta_i\) und Reflexionswinkel \(\theta_r\)
+        werden relativ zur Oberflächennormalen gemessen und sind gleich groß.
+    }
+    \label{fig:reflection-side-view}
+\end{figure}
+
     Die Funktion gibt schließlich einen neuen Ray zurück:
 
     \begin{lstlisting}[language=Rust]
@@ -593,6 +667,7 @@
     Der reflektierte Ray startet somit am berechneten Trefferpunkt und bewegt sich
     in der neuen Reflexionsrichtung weiter. Dadurch können mehrere Reflexionen
     eines Schallstrahls nacheinander simuliert werden.
+
 
     \subsubsection{Mikrofonerkennung im 3D-Raum}
     \label{subsubsec:3d-microphone}
@@ -659,6 +734,7 @@
     Diese Methode ist robuster als eine reine Punktprüfung, da es bei zufällig
     ausgesendeten Rays sehr unwahrscheinlich wäre, den exakten Mittelpunkt des
     Mikrofons zu treffen.
+
 
     \subsubsection{Integration in die Simulationsschleife}
     \label{subsubsec:simulation-loop}
@@ -792,6 +868,7 @@
     dieses Rays beendet. Dadurch werden sehr leise und für das Ergebnis kaum
     relevante Reflexionen nicht unnötig weiterberechnet.
 
+
     \subsubsection{Konfiguration und Visualisierung der 3D-Simulation}
     \label{subsubsec:3d-config-visualization}
 
@@ -873,6 +950,7 @@
     Damit unterstützt die Visualisierung die Überprüfung der neuen
     3D-Kollisions- und Reflexionslogik.
 
+
     \subsubsection{Ergebnis der Umstellung}
     \label{subsubsec:3d-result}
 
@@ -893,7 +971,6 @@
 
     Gleichzeitig bleibt die Architektur modular, da Geometrie, Simulation,
     Konfiguration und Export klar voneinander getrennt sind.
-
 
     \section{Hochleistungs-Nebenläufigkeit und Datenparallelität}
     \label{sec:concurrency}
