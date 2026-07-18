@@ -71,7 +71,6 @@
     Das stochastische Raytracing erfasst beide Phasen natürlich, da sowohl kurze Direktpfade
     als auch komplexe Mehrfachreflexionen in der Impulsantwort akkumuliert werden.
 
-
     \subsection{Monte-Carlo-Integration und Raytracing}
     \label{subsec:montecarlo}
 
@@ -108,7 +107,6 @@
     $N$ Stichproben direkt auf beliebig viele CPU-Kerne aufteilen
     (siehe Kapitel~\ref{sec:concurrency}).
 
-
     \subsection{Digitale Signalverarbeitung: Impulsantwort und schnelle Faltung}
     \label{subsec:dsp}
 
@@ -142,7 +140,7 @@
     Das \emph{Faltungstheorem} der Fouriertransformation besagt, dass eine Faltung im
     Zeitbereich einem punktweisen Produkt im Frequenzbereich entspricht:
     \[Y(f) = \mathcal{F}\{x\}(f) \cdot \mathcal{F}\{h\}(f)
-      \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
+    \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
     Durch den Einsatz der Fast Fourier Transform (FFT) sinkt die Komplexität auf
     $\mathcal{O}((N+M)\log(N+M))$, was bei großen $M$ einen massiven Speedup bedeutet.
 
@@ -280,93 +278,220 @@
     Innerhalb der Rust-Codebasis wird diese Berechnung der Vektorreflexion durch die \texttt{reflect} Methode optimiert, die vom \texttt{glam}-Crate bereitgestellt wird und
     Single Instruction, Multiple Data (SIMD)-Instruktionen nutzt, um diese Operationen mit minimalem Overhead durchzuführen.
 
-    \subsection{Umstellung auf 3D: Vec3 und Möller-Trumbore-Algorithmus}
+    \subsection{Umstellung auf 3D: \texttt{Vec3} und Möller-Trumbore-Algorithmus}
+    \label{subsec:3d-migration}
 
-    Im Verlauf des Projekts wurde die ursprüngliche zweidimensionale Physik-Engine auf einen vollständig dreidimensionalen Simulationsraum erweitert. Ziel dieser Umstellung war es, Schallstrahlen nicht mehr ausschließlich in einer Ebene zu simulieren, sondern deren Ausbreitung in realistischen dreidimensionalen Räumen zu ermöglichen.
-    Hierfür wurden die Datentypen der zentralen
-    Simulationsobjekte (Ray, Mikrofonposition, Lautsprecherposition und Reflexionspunkte) von \texttt{Vec2} auf \texttt{Vec3} migriert. Während ein Punkt zuvor lediglich durch die Koordinaten $(x,y)$ beschrieben wurde, enthält ein Punkt im dreidimensionalen Raum zusätzlich eine Höhenkoordinate $z$:
+    Die aktuelle Implementierung der Physik-Engine arbeitet vollständig im
+    dreidimensionalen Raum. Im Vergleich zur ursprünglichen zweidimensionalen
+    Grundidee mussten dafür die zentralen geometrischen Datenstrukturen und die
+    Kollisionsberechnung angepasst werden.
+
+    Ziel dieser Umstellung war es, Schallstrahlen nicht mehr ausschließlich in
+    einer Ebene zu simulieren, sondern deren Ausbreitung in einem Raum mit Breite,
+    Tiefe und Höhe zu ermöglichen.
+
+    Positionen und Richtungen werden daher nicht mehr mit zwei Koordinaten,
+    sondern mit dem Datentyp \texttt{Vec3} beschrieben. Ein Punkt im Raum besitzt
+    eine \(x\)-, \(y\)- und \(z\)-Koordinate:
 
     \[
-    P = (x,y,z)
+        P = (x,y,z)
     \]
 
-    Die Erweiterung auf drei Dimensionen betrifft insbesondere die Positionen von Lautsprechern, Mikrofonen, Reflexionspunkten sowie die Richtungsvektoren der ausgesendeten Schallstrahlen.
+    Diese Erweiterung betrifft insbesondere die Position des Lautsprechers, die
+    Position des Mikrofons, die Startpunkte der Rays, deren Richtungsvektoren
+    sowie die Reflexionspunkte an den Raumflächen.
+
+    \subsubsection{Neue 3D-Datenstrukturen: \texttt{Ray} und \texttt{Triangle}}
+    \label{subsubsec:ray-triangle}
+
+    Die Grundlage der Umstellung war die Anpassung der zentralen Datenstrukturen.
+    Ein Schallstrahl wird in der neuen Implementierung durch die Struktur
+    \texttt{Ray} beschrieben. Diese enthält den aktuellen Ursprung des Strahls und
+    seine Richtung im dreidimensionalen Raum:
+
+    \begin{lstlisting}[language=Rust]
+    pub struct Ray {
+        pub origin: Vec3,
+        pub direction: Vec3,
+    }
+    \end{lstlisting}
+
+    Der Wert \texttt{origin} beschreibt den aktuellen Startpunkt des Strahls.
+    Zu Beginn entspricht dieser Punkt der Lautsprecherposition. Nach jeder
+    Reflexion wird der berechnete Trefferpunkt an einer Fläche zum neuen Ursprung
+    des reflektierten Strahls.
+
+    Der Wert \texttt{direction} beschreibt die Ausbreitungsrichtung des Strahls.
+    Dieser Richtungsvektor wird normalisiert verwendet, damit nur die Richtung und
+    nicht die Länge des Vektors eine Rolle spielt.
+
+    Auch die Modellierung der Raumflächen musste verändert werden. In der
+    zweidimensionalen Version konnten Wände als Liniensegmente dargestellt werden.
+    In einem dreidimensionalen Raum muss ein Strahl jedoch mit Flächen kollidieren.
+    Aus diesem Grund werden Raumflächen nun als Dreiecke modelliert:
+
+    \begin{lstlisting}[language=Rust]
+    pub struct Triangle {
+        pub v0: Vec3,
+        pub v1: Vec3,
+        pub v2: Vec3,
+        pub absorption: f32,
+    }
+    \end{lstlisting}
+
+    Ein Dreieck besteht aus den drei Eckpunkten \texttt{v0}, \texttt{v1} und
+    \texttt{v2}. Diese Punkte definieren eindeutig eine Fläche im
+    dreidimensionalen Raum.
+
+    Zusätzlich besitzt jedes Dreieck einen Absorptionswert. Dieser beschreibt, wie
+    stark ein Schallstrahl bei einer Reflexion an der jeweiligen Fläche
+    abgeschwächt wird. Damit enthält die Struktur neben der geometrischen
+    Beschreibung auch eine akustische Eigenschaft.
 
     \subsubsection{Ablösung des 2D-Segment-Schnitts}
+    \label{subsubsec:replace-2d-intersection}
 
-    Der bisher verwendete Strahl-Segment-Schnitt konnte ausschließlich Kollisionen mit zweidimensionalen Wandsegmenten berechnen. Für eine physikalisch korrekte Simulation in 3D müssen Schallstrahlen jedoch mit dreidimensionalen Flächen interagieren.
+    Der vorherige Schnittpunktalgorithmus war auf zweidimensionale
+    Strahl-Segment-Schnitte ausgelegt. Dabei wurde geprüft, ob ein Ray eine
+    Wandlinie innerhalb eines begrenzten Segments trifft.
 
-    Aus diesem Grund werden Wände nicht mehr als Liniensegmente modelliert, sondern als Dreiecke. Dreiecke stellen die Standardrepräsentation polygonaler Oberflächen in der Computergrafik und Physiksimulation dar und ermöglichen die Darstellung beliebig komplexer Geometrien.
+    Dieses Verfahren ist für einen dreidimensionalen Raum nicht ausreichend, da
+    Wände, Boden und Decke nicht als Linien, sondern als Flächen betrachtet werden
+    müssen.
 
-    \newpage
+    Für die 3D-Version wurde daher auf Strahl-Dreieck-Schnittpunkte umgestellt.
+    Dreiecke eignen sich besonders für diese Aufgabe, da sie immer planar sind und
+    komplexe Flächen aus mehreren Dreiecken zusammengesetzt werden können.
+
+    Dadurch kann die Simulation nicht nur einfache rechteckige Räume, sondern
+    grundsätzlich auch komplexere polygonale Geometrien verarbeiten.
+
+    \subsubsection{Aufbau des 3D-Raums aus Dreiecken}
+    \label{subsubsec:room-triangles}
+
+    Obwohl der Schnittpunktalgorithmus mit Dreiecken arbeitet, bestehen einfache
+    Raumflächen wie Boden, Decke oder Wände meistens aus Rechtecken. Deshalb wird
+    jede rechteckige Raumfläche in zwei Dreiecke zerlegt.
+
+    Dies geschieht in der Hilfsfunktion
+    \texttt{add\_rect\_as\_two\_triangles}:
+
+    \begin{lstlisting}[language=Rust]
+    fn add_rect_as_two_triangles(
+        triangles: &mut Vec<Triangle>,
+        a: Vec3,
+        b: Vec3,
+        c: Vec3,
+        d: Vec3,
+        absorption: f32,
+    ) {
+        triangles.push(Triangle {
+            v0: a,
+            v1: b,
+            v2: c,
+            absorption,
+        });
+
+        triangles.push(Triangle {
+            v0: a,
+            v1: c,
+            v2: d,
+            absorption,
+        });
+    }
+    \end{lstlisting}
+
+    Das erste Dreieck besteht aus den Punkten \texttt{a}, \texttt{b} und
+    \texttt{c}. Das zweite Dreieck besteht aus den Punkten \texttt{a},
+    \texttt{c} und \texttt{d}. Zusammen bilden beide Dreiecke wieder die
+    vollständige rechteckige Fläche.
+
+    Dadurch kann der Möller-Trumbore-Algorithmus einheitlich auf alle Raumflächen
+    angewendet werden.
+
+    Im Hauptprogramm wird zunächst eine Liste für alle Dreiecke des Raums
+    angelegt:
+
+    \begin{lstlisting}[language=Rust]
+    let mut room: Vec<Triangle> = Vec::new();
+    \end{lstlisting}
+
+    Anschließend werden Boden, Decke und die vier Wände des Testraums
+    hinzugefügt. Der Raum besitzt im Testaufbau eine Breite von \(10{,}0\), eine
+    Tiefe von \(10{,}0\) und eine Höhe von \(3{,}0\).
+
+    Das Koordinatensystem ist so aufgebaut, dass \(x\) die horizontale Richtung,
+    \(y\) die Tiefe des Raums und \(z\) die Höhe beschreibt. Ein Beispiel ist der
+    Boden des Raums:
+
+    \begin{lstlisting}[language=Rust]
+    add_rect_as_two_triangles(
+        &mut room,
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(width, 0.0, 0.0),
+        Vec3::new(width, depth, 0.0),
+        Vec3::new(0.0, depth, 0.0),
+        absorption,
+    );
+    \end{lstlisting}
+
+    Alle vier Punkte besitzen hier die \(z\)-Koordinate \(0{,}0\), da sich der
+    Boden auf der Höhe null befindet. Für die Decke wird dagegen die
+    \(z\)-Koordinate \texttt{height} verwendet.
+
+    Bei den Wänden bleibt jeweils eine Koordinate konstant, während die beiden
+    anderen Koordinaten die jeweilige Wandfläche aufspannen.
+
     \subsubsection{Möller-Trumbore-Algorithmus}
+    \label{subsubsec:moller-trumbore}
 
-    Zur Berechnung von Strahl-Dreieck-Schnittpunkten wurde der Möller-Trumbore-Algorithmus implementiert. Dieser Algorithmus gehört zu den am häufigsten eingesetzten Verfahren im Raytracing, da er Schnittpunkte direkt berechnen kann, ohne zuvor die Ebenengleichung des Dreiecks bestimmen zu müssen.
-    Gegeben sind:
+    Zur Berechnung von Strahl-Dreieck-Schnittpunkten wurde der
+    Möller-Trumbore-Algorithmus implementiert. Dieser Algorithmus wird häufig im
+    Raytracing verwendet, da er direkt prüft, ob ein Ray ein Dreieck trifft, ohne
+    zuvor explizit die Ebenengleichung des Dreiecks bestimmen zu müssen.
 
-    \begin{itemize}
-    \item Ursprung des Strahls $O$
-    \item Richtungsvektor des Strahls $\vec{D}$
-    \item Die drei Eckpunkte des Dreiecks $V_0$, $V_1$ und $V_2$
-    \end{itemize}
+    Die Funktion \texttt{check\_intersection} bildet den Kern dieser
+    Schnittpunktprüfung. Sie erhält einen Ray und ein Dreieck. Falls ein gültiger
+    Treffer existiert, gibt sie einen neuen reflektierten Ray zurück. Liegt kein
+    gültiger Treffer vor, wird \texttt{None} zurückgegeben.
 
-    Zunächst werden die beiden Kantenvektoren des Dreiecks berechnet:
+    Zunächst werden aus den drei Eckpunkten des Dreiecks zwei Kantenvektoren
+    berechnet:
 
-    \[
-    \vec{E_1} = V_1 - V_0
-    \]
-
-    \[
-    \vec{E_2} = V_2 - V_0
-    \]
-
-    Anschließend wird mithilfe von Kreuz- und Skalarprodukten überprüft, ob der Strahl das Dreieck trifft und ob sich der Schnittpunkt innerhalb der Dreiecksgrenzen befindet.
-
-    Der Algorithmus liefert dabei drei wichtige Parameter:
-
-    \begin{itemize}
-    \item $t$ : Entfernung des Schnittpunkts entlang des Strahls
-    \item $u$ : baryzentrische Koordinate innerhalb des Dreiecks
-    \item $v$ : baryzentrische Koordinate innerhalb des Dreiecks
-    \end{itemize}
-
-    Ein gültiger Schnittpunkt liegt nur dann vor, wenn folgende Bedingungen erfüllt sind:
-
-    \[
-    t > 0
-    \]
-
-    \[
-    0 \leq u \leq 1
-    \]
-
-    \[
-    0 \leq v \leq 1
-    \]
-
-    \[
-    u + v \leq 1
-    \]
-
-    Werden diese Bedingungen erfüllt, befindet sich der Schnittpunkt innerhalb des Dreiecks und eine Reflexion kann berechnet werden.
-
-    \vspace{0.3em}
-    Der folgende Codeausschnitt zeigt den Kern des Möller-Trumbore-Schnittpunkttests.
-    Die vollständige Implementierung befindet sich in
-    \texttt{rust\_service/src/geometry.rs} in der Funktion
-    \texttt{check\_intersection}.
-
-    \begin{lstlisting}
+    \begin{lstlisting}[language=Rust]
     let edge1 = triangle.v1 - triangle.v0;
     let edge2 = triangle.v2 - triangle.v0;
+    \end{lstlisting}
 
+    Diese beiden Kantenvektoren spannen die Dreiecksfläche im Raum auf.
+    Anschließend wird ein Kreuzprodukt zwischen der Strahlrichtung und der zweiten
+    Dreieckskante gebildet:
+
+    \begin{lstlisting}[language=Rust]
     let h = ray.direction.cross(edge2);
     let a = edge1.dot(h);
+    \end{lstlisting}
+
+    Der Wert \texttt{a} zeigt an, ob der Ray parallel zur Dreiecksfläche
+    verläuft. Ist dieser Wert nahe null, kann kein eindeutiger Schnittpunkt
+    berechnet werden. Deshalb wird mit einem kleinen Epsilon-Wert gearbeitet:
+
+    \begin{lstlisting}[language=Rust]
+    let epsilon = 1e-6;
 
     if a.abs() < epsilon {
         return None;
     }
+    \end{lstlisting}
 
+    Diese Toleranz ist notwendig, da Gleitkommazahlen nicht immer exakt berechnet
+    werden. Ohne den Schwellenwert könnten numerische Rundungsfehler zu falschen
+    Treffern führen.
+
+    Anschließend wird die erste baryzentrische Koordinate \(u\) berechnet:
+
+    \begin{lstlisting}[language=Rust]
     let f = 1.0 / a;
     let s = ray.origin - triangle.v0;
     let u = f * s.dot(h);
@@ -374,44 +499,400 @@
     if u < 0.0 || u > 1.0 {
         return None;
     }
+    \end{lstlisting}
 
+    Liegt \(u\) außerhalb des Bereichs von \(0{,}0\) bis \(1{,}0\), trifft der
+    Ray möglicherweise die Ebene des Dreiecks, aber nicht die begrenzte
+    Dreiecksfläche selbst.
+
+    Danach wird die zweite baryzentrische Koordinate \(v\) berechnet:
+
+    \begin{lstlisting}[language=Rust]
     let q = s.cross(edge1);
     let v = f * ray.direction.dot(q);
 
     if v < 0.0 || u + v > 1.0 {
         return None;
     }
-
-    let t = f * edge2.dot(q);
     \end{lstlisting}
 
+    Die Bedingung \(u + v > 1{,}0\) stellt sicher, dass sich der Trefferpunkt
+    nicht außerhalb des Dreiecks befindet.
+
+    Ein gültiger Treffer liegt nur dann vor, wenn die baryzentrischen Koordinaten
+    innerhalb der Dreiecksgrenzen bleiben.
+
+    Zum Schluss wird der Parameter \(t\) berechnet. Dieser beschreibt die
+    Entfernung des Schnittpunkts entlang der Strahlrichtung:
+
+    \begin{lstlisting}[language=Rust]
+    let t = f * edge2.dot(q);
+
+    if t < 0.001 {
+        return None;
+    }
+    \end{lstlisting}
+
+    Negative oder sehr kleine Werte werden verworfen. Dadurch werden Treffer
+    ignoriert, die hinter dem Ursprung des Rays liegen oder unmittelbar am
+    Startpunkt auftreten.
+
+    Diese Prüfung verhindert sogenannte Selbsttreffer, bei denen ein
+    reflektierter Ray direkt wieder dieselbe Fläche trifft.
+
     \subsubsection{Reflexionsberechnung}
+    \label{subsubsec:3d-reflection}
 
-    Nach erfolgreicher Kollisionsprüfung wird die Oberflächennormale des Dreiecks bestimmt. Die Oberflächennormale wird zunächst normiert,
-    um einen Einheitsnormalenvektor zu erhalten. Diese ergibt sich aus dem Kreuzprodukt der beiden Kantenvektoren:
+    Die zugrunde liegende Reflexionsgleichung entspricht der bereits in
+    Abschnitt~\ref{subsec:reflection-vector-calculation} beschriebenen
+    Vektorreflexion.
 
-    \[
-    \vec{N} = \vec{E_1} \times \vec{E_2}
-    \]
+    Im dreidimensionalen Fall wird die Oberflächennormale jedoch nicht aus einem
+    zweidimensionalen Wandvektor, sondern aus den beiden Kantenvektoren des
+    getroffenen Dreiecks berechnet.
 
-    Die Richtung des reflektierten Strahls wird anschließend durch die allgemeine Reflexionsgleichung berechnet:
+    Sobald ein gültiger Schnittpunkt gefunden wurde, wird zunächst der tatsächliche
+    Trefferpunkt im dreidimensionalen Raum bestimmt:
 
+    \begin{lstlisting}[language=Rust]
+    let hit_point = ray.origin + ray.direction * t;
+    \end{lstlisting}
 
-    \[
-    \vec{R}
-    =
-    \vec{D}
-    -
-    2(\vec{D}\cdot\vec{N})\vec{N}
-    \]
+    Dieser Punkt wird anschließend zum neuen Ursprung des reflektierten Rays.
 
-    Dadurch entstehen physikalisch plausible Reflexionen an dreidimensionalen Oberflächen.
+    Danach wird die Oberflächennormale des Dreiecks berechnet. Die Normale steht
+    senkrecht auf der Dreiecksfläche und ergibt sich aus dem Kreuzprodukt der
+    beiden Kantenvektoren:
+
+    \begin{lstlisting}[language=Rust]
+    let normal = edge1.cross(edge2).normalize();
+    \end{lstlisting}
+
+    Die neue Richtung des Schallstrahls wird berechnet, indem die ursprüngliche
+    Richtung an dieser Normalen gespiegelt wird:
+
+    \begin{lstlisting}[language=Rust]
+    let bounced_direction =
+        ray.direction.reflect(normal).normalize();
+    \end{lstlisting}
+
+    Die Methode \texttt{reflect} des \texttt{glam}-Crates übernimmt die
+    mathematische Spiegelung des Richtungsvektors. Anschließend wird die neue
+    Richtung normalisiert, damit sie weiterhin als Einheitsvektor verwendet werden
+    kann.
+
+    Die Funktion gibt schließlich einen neuen Ray zurück:
+
+    \begin{lstlisting}[language=Rust]
+    Some(Ray {
+        origin: hit_point,
+        direction: bounced_direction,
+    })
+    \end{lstlisting}
+
+    Der reflektierte Ray startet somit am berechneten Trefferpunkt und bewegt sich
+    in der neuen Reflexionsrichtung weiter. Dadurch können mehrere Reflexionen
+    eines Schallstrahls nacheinander simuliert werden.
+
+    \subsubsection{Mikrofonerkennung im 3D-Raum}
+    \label{subsubsec:3d-microphone}
+
+    Neben der Reflexion an Dreiecksflächen musste auch die Erkennung eines
+    Mikrofontreffers an den dreidimensionalen Raum angepasst werden.
+
+    Das Mikrofon wird in der Simulation als Kugel mit einem konfigurierbaren
+    Radius betrachtet. Ein Ray muss daher nicht exakt den Mittelpunkt des
+    Mikrofons treffen, sondern nur nahe genug an diesem vorbeifliegen.
+
+    Die Funktion \texttt{check\_mic\_intersection} prüft hierfür den Abstand
+    zwischen einem Ray-Segment und dem Mikrofonmittelpunkt.
+
+    Wichtig ist, dass nicht der unendliche Ray betrachtet wird, sondern nur das
+    konkrete Segment zwischen dem Startpunkt des aktuellen Rays und dem nächsten
+    Trefferpunkt an einer Fläche:
+
+    \begin{lstlisting}[language=Rust]
+    pub fn check_mic_intersection(
+        start: Vec3,
+        end: Vec3,
+        mic_center: Vec3,
+        mic_radius: f32,
+    ) -> bool {
+        let segment = end - start;
+        let segment_length_sq =
+            segment.length_squared();
+
+        if segment_length_sq == 0.0 {
+            return start.distance(mic_center)
+                <= mic_radius;
+        }
+
+        let to_mic = mic_center - start;
+
+        let t =
+            to_mic.dot(segment)
+            / segment_length_sq;
+
+        let clamped_t = t.clamp(0.0, 1.0);
+
+        let closest_point =
+            start + segment * clamped_t;
+
+        closest_point.distance(mic_center)
+            <= mic_radius
+    }
+    \end{lstlisting}
+
+    Zunächst wird der Segmentvektor zwischen Start- und Endpunkt berechnet.
+    Danach wird der Mikrofonmittelpunkt auf dieses Segment projiziert.
+
+    Der berechnete Projektionswert wird mit
+    \texttt{clamp(0.0, 1.0)} begrenzt. Dadurch wird sichergestellt, dass nur das
+    tatsächliche Segment und nicht die unendliche Verlängerung des Rays betrachtet
+    wird.
+
+    Anschließend wird der Punkt auf dem Segment berechnet, der dem Mikrofon am
+    nächsten liegt. Ist der Abstand zwischen diesem Punkt und dem
+    Mikrofonmittelpunkt kleiner oder gleich dem Mikrofonradius, wird ein Treffer
+    registriert.
+
+    Diese Methode ist robuster als eine reine Punktprüfung, da es bei zufällig
+    ausgesendeten Rays sehr unwahrscheinlich wäre, den exakten Mittelpunkt des
+    Mikrofons zu treffen.
+
+    \subsubsection{Integration in die Simulationsschleife}
+    \label{subsubsec:simulation-loop}
+
+    Die neue Schnittpunktprüfung wird in der Simulationslogik verwendet, um jeden
+    einzelnen Schallstrahl über mehrere Reflexionen hinweg zu verfolgen.
+
+    Zunächst wird ein zufälliger Startstrahl an der Lautsprecherposition erzeugt:
+
+    \begin{lstlisting}[language=Rust]
+    fn generate_initial_ray(
+        config: &SimulationConfig
+    ) -> Ray {
+        let mut rng = rand::rng();
+
+        let theta: f32 =
+            rng.random_range(0.0..(2.0 * PI));
+
+        let z: f32 =
+            rng.random_range(-1.0..1.0);
+
+        let r =
+            (1.0_f32 - z * z).sqrt();
+
+        let direction = Vec3::new(
+            r * theta.cos(),
+            r * theta.sin(),
+            z,
+        ).normalize();
+
+        Ray {
+            origin: config.speaker_position,
+            direction,
+        }
+    }
+    \end{lstlisting}
+
+    Anders als in einer zweidimensionalen Simulation reicht hier kein einzelner
+    Winkel in einer Ebene aus. Stattdessen wird eine zufällige Richtung auf der
+    Einheitskugel erzeugt.
+
+    Der Winkel \(\theta\) beschreibt die Richtung um die \(z\)-Achse. Der Wert
+    \(z\) bestimmt den Anteil der Richtung nach oben oder unten. Aus diesen
+    Werten entsteht ein normalisierter \texttt{Vec3}-Richtungsvektor.
+
+    Für die eigentliche Kollision wird in der Funktion \texttt{cast\_ray} das
+    nächstgelegene getroffene Dreieck gesucht:
+
+    \begin{lstlisting}[language=Rust]
+    for triangle in triangles {
+        if let Some(bounced_ray) =
+            geometry::check_intersection(
+                ray,
+                triangle
+            )
+        {
+            let distance =
+                ray.origin.distance(
+                    bounced_ray.origin
+                );
+
+            if distance < shortest_distance {
+                shortest_distance = distance;
+
+                closest_bounced_ray = Some((
+                    bounced_ray,
+                    triangle.absorption
+                ));
+            }
+        }
+    }
+    \end{lstlisting}
+
+    Dabei wird jedes Dreieck des Raums geprüft. Wenn mehrere gültige Treffer
+    existieren, wird der Treffer mit der kürzesten Distanz ausgewählt.
+
+    Dies ist notwendig, da ein Ray zuerst auf die nächstgelegene Fläche treffen
+    muss und nicht auf eine weiter entfernte Fläche dahinter.
+
+    In der Funktion \texttt{simulate\_single\_ray} wird dieser Ablauf über
+    mehrere Reflexionen wiederholt. Nach jedem Treffer wird geprüft, ob der Ray auf
+    seinem Flugsegment am Mikrofon vorbeigeflogen ist:
+
+    \begin{lstlisting}[language=Rust]
+    if geometry::check_mic_intersection(
+        start_point,
+        end_point,
+        config.mic_position,
+        config.mic_radius,
+    ) {
+        let distance_to_mic =
+            start_point.distance(
+                config.mic_position
+            );
+
+        let total_distance_at_hit =
+            total_distance + distance_to_mic;
+
+        if total_distance_at_hit > 0.001 {
+            ray_hits.push((
+                total_distance_at_hit / 343.0,
+                current_pressure,
+            ));
+        }
+    }
+    \end{lstlisting}
+
+    Wird ein Mikrofontreffer erkannt, werden die Ankunftszeit und der aktuelle
+    Druckwert gespeichert.
+
+    Die Ankunftszeit wird in der aktuellen Implementierung näherungsweise über die
+    zurückgelegte Strecke berechnet und anschließend durch die
+    Schallgeschwindigkeit geteilt. Dafür wird der Näherungswert
+    \(343{,}0\,\mathrm{m/s}\) verwendet.
+
+    Entsprechend dem in Abschnitt~\ref{subsec:akustik} beschriebenen
+    Absorptionsmodell wird der aktuelle Druckwert nach jeder Reflexion reduziert:
+
+    \begin{lstlisting}[language=Rust]
+    current_pressure *= 1.0 - absorption;
+
+    if current_pressure < config.min_pressure {
+        break;
+    }
+    \end{lstlisting}
+
+    Der Absorptionswert der getroffenen Fläche bestimmt, wie stark der Ray nach
+    der Reflexion abgeschwächt wird.
+
+    Sinkt der Druck unter den konfigurierten Mindestwert, wird die Simulation
+    dieses Rays beendet. Dadurch werden sehr leise und für das Ergebnis kaum
+    relevante Reflexionen nicht unnötig weiterberechnet.
+
+    \subsubsection{Konfiguration und Visualisierung der 3D-Simulation}
+    \label{subsubsec:3d-config-visualization}
+
+    Die Parameter der Simulation werden aus der Datei
+    \texttt{input\_config.json} geladen.
+
+    Die zugehörige Struktur \texttt{SimulationConfig} enthält unter anderem die
+    maximale Anzahl an Reflexionen, den minimalen Druckwert, den Mikrofonradius,
+    die Anzahl der auszusendenden Rays sowie die Positionen von Lautsprecher und
+    Mikrofon:
+
+    \begin{lstlisting}[language=Rust]
+    #[derive(Deserialize)]
+    pub struct SimulationConfig {
+        pub max_bounces: u32,
+        pub min_pressure: f32,
+        pub mic_radius: f32,
+        pub mic_position: Vec3,
+        pub rays_to_cast: u32,
+        pub speaker_position: Vec3,
+    }
+    \end{lstlisting}
+
+    Auch an dieser Stelle zeigt sich die Umstellung auf den dreidimensionalen
+    Raum: Sowohl \texttt{mic\_position} als auch
+    \texttt{speaker\_position} sind nun vom Typ \texttt{Vec3}.
+
+    In der Konfigurationsdatei werden diese Positionen deshalb als Arrays mit drei
+    Zahlen angegeben:
+
+    \begin{lstlisting}
+    {
+      "max_bounces": 32,
+      "min_pressure": 0.001,
+      "mic_radius": 1.5,
+      "mic_position": [5.0, 5.0, 1.5],
+      "rays_to_cast": 1000000,
+      "speaker_position": [2.0, 2.0, 1.5]
+    }
+    \end{lstlisting}
+
+    Die dritte Koordinate beschreibt die Höhe im Raum.
+
+    Die Lautsprecherposition \texttt{[2.0, 2.0, 1.5]} bedeutet beispielsweise,
+    dass der Lautsprecher bei \(x = 2{,}0\), \(y = 2{,}0\) und einer Höhe von
+    \(z = 1{,}5\) Metern platziert ist.
+
+    Gleiches gilt für die Mikrofonposition. Dadurch kann die Simulation die
+    Schallausbreitung nicht nur auf einer zweidimensionalen Ebene, sondern
+    innerhalb eines vollständigen 3D-Raums berechnen.
+
+    Neben der Konfiguration wurden auch die Visualisierungsdaten an die
+    dreidimensionale Darstellung angepasst.
+
+    Die Struktur \texttt{VisualizerOutput} speichert Lautsprecher, Mikrofon und
+    die Punkte der Ray-Pfade ebenfalls als \texttt{Vec3}:
+
+    \begin{lstlisting}[language=Rust]
+    pub struct VisualizerOutput {
+        pub speaker: Vec3,
+        pub mic: Vec3,
+        pub mic_radius: f32,
+        pub rays: Vec<Vec<Vec3>>,
+    }
+    \end{lstlisting}
+
+    Die Variable \texttt{rays} enthält mehrere Ray-Pfade. Jeder einzelne Pfad
+    besteht aus mehreren Punkten im Raum, wobei jeder Punkt durch drei Koordinaten
+    beschrieben wird.
+
+    Dadurch können ausgewählte Strahlen mit ihren Reflexionspunkten als
+    dreidimensionale Pfade ausgegeben werden.
+
+    Die Visualisierungsdaten dienen vor allem zur Kontrolle und zum Debugging. Sie
+    ermöglichen zu prüfen, ob die Rays korrekt von der Lautsprecherposition
+    ausgesendet werden, ob sie an den Dreiecksflächen reflektieren und ob die
+    berechneten Pfade im Raum plausibel verlaufen.
+
+    Damit unterstützt die Visualisierung die Überprüfung der neuen
+    3D-Kollisions- und Reflexionslogik.
 
     \subsubsection{Ergebnis der Umstellung}
+    \label{subsubsec:3d-result}
 
-    Die erfolgreiche Migration von \texttt{Vec2} auf \texttt{Vec3} bildet die Grundlage für zukünftige Erweiterungen der Physik-Engine. Durch die Implementierung des Möller-Trumbore-Algorithmus können nun beliebige polygonale 3D-Oberflächen verarbeitet werden. Damit wurde die Grundlage geschaffen, realistische dreidimensionale Raumakustik mit beliebig komplexen Polygonnetzen zu simulieren. Die bisherige Beschränkung auf zweidimensionale Wandsegmente wurde vollständig aufgehoben.
+    Durch die Migration von \texttt{Vec2} auf \texttt{Vec3} wurde die bisherige
+    Beschränkung auf eine zweidimensionale Simulation aufgehoben.
 
+    Die Engine kann nun Schallstrahlen in einem dreidimensionalen Raum erzeugen,
+    deren Kollisionen mit Dreiecksflächen berechnen und die reflektierten Rays
+    weiterverfolgen.
 
+    Die Einführung des Möller-Trumbore-Algorithmus ermöglicht eine robuste und
+    direkte Prüfung von Strahl-Dreieck-Schnittpunkten.
+
+    In Kombination mit der Reflexionsberechnung über Dreiecksnormalen, der
+    Mikrofonerkennung als Segment-Kugel-Prüfung und dem Export der
+    dreidimensionalen Ray-Pfade bildet diese Umstellung die Grundlage für eine
+    realistischere akustische Simulation.
+
+    Gleichzeitig bleibt die Architektur modular, da Geometrie, Simulation,
+    Konfiguration und Export klar voneinander getrennt sind.
 
 
     \section{Hochleistungs-Nebenläufigkeit und Datenparallelität}
@@ -497,57 +978,387 @@ walls: &Vec<Wall>
 
 
     \newpage
+
+
     \section{Systemarchitektur und Pipeline-Orchestrierung}
-    \label{sec:System}
+    \label{sec:systemarchitektur}
 
-    \subsection{Python-Subprozess Runner und JSON-Ingestion}
+    Die Rust-Physik-Engine bildet den rechenintensiven Kern der Simulation.
+    Die weitere Verarbeitung der erzeugten Impulsantwort erfolgt in der
+    Python-Pipeline.
 
-    Neben der Rust-Physik-Engine wurde eine Python-Schnittstelle implementiert, um die vorkompilierte Rust-Binary automatisiert aus der Python-Pipeline heraus zu starten. Diese Schnittstelle befindet sich in der Datei \texttt{python\_service/rust\_runner.py} und bildet die Verbindung zwischen der performanten Rust-Simulation und den weiteren Verarbeitungsschritten in Python.
+    Um beide Teile miteinander zu verbinden, wurde eine Schnittstelle
+    implementiert, die die kompilierte Rust-Binary aus Python heraus startet und
+    anschließend die erzeugte Datei \texttt{ir\_output.json} einliest.
 
-    \vspace{0.3em}
-    Die Funktion \texttt{run\_rust\_and\_load\_json} erhält den Pfad zur Rust-Binary sowie den erwarteten Pfad zur Ausgabedatei \texttt{ir\_output.json}. Zunächst werden die übergebenen Pfade geprüft. Existiert die Rust-Binary nicht oder zeigt der Pfad nicht auf eine Datei, wird ein klarer Fehler ausgelöst. Dadurch werden fehlerhafte Konfigurationen früh erkannt.
+    Die Schnittstelle befindet sich in der Datei
+    \texttt{python\_service/rust\_runner.py}. Ihre zentrale Funktion ist
+    \texttt{run\_rust\_and\_load\_json}.
 
-    \vspace{0.3em}
-    Anschließend startet Python die Rust-Binary über das Modul \texttt{subprocess}. Die Rust-Simulation läuft dabei als externer Prozess. Python wartet, bis dieser Prozess vollständig beendet ist, und prüft danach den Rückgabecode. Falls die Rust-Binary mit einem Fehler beendet wird, werden sowohl \texttt{stdout} als auch \texttt{stderr} ausgegeben, um die Fehlersuche zu erleichtern.
+    Sie übernimmt die Orchestrierung zwischen Python und Rust: Python startet den
+    Rust-Prozess, wartet auf dessen Abschluss, prüft die erzeugte Ausgabedatei und
+    stellt die geladenen Daten anschließend als Python-Dictionary bereit.
 
-    \vspace{0.3em}
-    Nach erfolgreicher Ausführung wird geprüft, ob die Datei \texttt{ir\_output.json} tatsächlich erzeugt wurde. Diese Datei enthält die von Rust berechneten Impulsantwort-Daten, insbesondere die Verzögerungszeiten und Druckwerte der empfangenen Schallstrahlen. Die JSON-Datei wird anschließend geöffnet, mit \texttt{json.load} eingelesen und als Python-Dictionary zurückgegeben.
+    \[
+        \text{Python-Pipeline}
+        \rightarrow
+        \texttt{rust\_runner.py}
+        \rightarrow
+        \text{Rust-Binary}
+        \rightarrow
+        \texttt{ir\_output.json}
+        \rightarrow
+        \text{Python-Dictionary}
+    \]
 
+    Diese Architektur trennt die Zuständigkeiten klar voneinander.
 
-    Der folgende Codeausschnitt zeigt den zentralen Ablauf der Schnittstelle:
-    \vspace{0.3em}
+    Rust bleibt für die performante Berechnung der akustischen Simulation
+    verantwortlich, während Python die Ausführung koordiniert und die
+    Ergebnisdaten für die spätere Audioverarbeitung vorbereitet.
 
-    \begin{lstlisting}
+    \subsection{Aufgabe der Python-Rust-Schnittstelle}
+    \label{subsec:python-rust-interface}
+
+    Die Funktion \texttt{run\_rust\_and\_load\_json} erhält zwei Parameter:
+    den Pfad zur kompilierten Rust-Binary und den erwarteten Namen der
+    JSON-Ausgabedatei.
+
+    Beide Werte werden zunächst in \texttt{Path}-Objekte umgewandelt, damit Pfade
+    plattformunabhängig und zuverlässig verarbeitet werden können.
+
+    \begin{lstlisting}[language=Python]
+    def run_rust_and_load_json(
+        rust_binary_path: str,
+        json_path: str
+    ) -> dict:
+        rust_binary = Path(
+            rust_binary_path
+        ).resolve()
+
+        json_file = Path(json_path)
+    \end{lstlisting}
+
+    Der Rückgabetyp der Funktion ist ein \texttt{dict}. Dadurch stehen die von
+    Rust erzeugten Daten nach erfolgreicher Ausführung direkt als
+    Python-Dictionary zur Verfügung.
+
+    Spätere Pipeline-Schritte müssen die JSON-Datei daher nicht erneut selbst
+    öffnen und parsen.
+
+    Die Schnittstelle erfüllt drei zentrale Aufgaben:
+
+    \begin{itemize}
+        \item Start der Rust-Binary als externer Prozess,
+        \item Prüfung und Validierung der Ausführung,
+        \item Einlesen der erzeugten Datei
+        \texttt{ir\_output.json}.
+    \end{itemize}
+
+    \subsection{Pfadprüfung und Arbeitsverzeichnis}
+    \label{subsec:path-validation}
+
+    Vor dem Start der Rust-Binary wird geprüft, ob der übergebene Pfad existiert
+    und ob es sich tatsächlich um eine Datei handelt.
+
+    Dadurch werden ungültige Pfadkonfigurationen bereits vor dem Start des
+    Subprozesses abgefangen.
+
+    \begin{lstlisting}[language=Python]
+    if not rust_binary.exists():
+        raise FileNotFoundError(
+            "Rust-Binary nicht gefunden: "
+            f"{rust_binary}"
+        )
+
+    if not rust_binary.is_file():
+        raise FileNotFoundError(
+            "Pfad ist keine Datei: "
+            f"{rust_binary}"
+        )
+    \end{lstlisting}
+
+    Diese Prüfung verbessert die Robustheit der Schnittstelle.
+
+    Ein falscher Pfad führt dadurch nicht zu einem schwer nachvollziehbaren Fehler
+    innerhalb von \texttt{subprocess.run}, sondern zu einer klaren und
+    verständlichen Fehlermeldung.
+
+    Zusätzlich wird geprüft, ob als erwartete Ausgabedatei tatsächlich
+    \texttt{ir\_output.json} übergeben wurde:
+
+    \begin{lstlisting}[language=Python]
+    if json_file.name != "ir_output.json":
+        raise ValueError(
+            "Rust exportiert aktuell fest nach "
+            "'ir_output.json'. "
+            "Uebergeben wurde aber: "
+            f"{json_file.name}"
+        )
+    \end{lstlisting}
+
+    Diese Prüfung ist notwendig, weil die Rust-Seite aktuell fest in eine Datei
+    mit dem Namen \texttt{ir\_output.json} exportiert.
+
+    Würde Python eine andere Datei erwarten, würde die Schnittstelle nach der
+    Ausführung an der falschen Stelle suchen. Die Prüfung verhindert damit eine
+    inkonsistente Annahme zwischen Rust und Python.
+
+    Ein weiterer wichtiger Punkt ist das Arbeitsverzeichnis.
+
+    Die Rust-Simulation benötigt die Datei \texttt{input\_config.json}. Da sich
+    die kompilierte Binary typischerweise in einem Unterordner wie
+    \texttt{target/release} befindet, wird der passende Projektordner automatisch
+    gesucht:
+
+    \begin{lstlisting}[language=Python]
+    rust_service_dir = rust_binary.parent
+
+    for parent in rust_binary.parents:
+        config_file = (
+            parent / "input_config.json"
+        )
+
+        if config_file.exists():
+            rust_service_dir = parent
+            break
+    \end{lstlisting}
+
+    Sobald ein Ordner mit \texttt{input\_config.json} gefunden wird, wird dieser
+    als Arbeitsverzeichnis für den Rust-Prozess verwendet.
+
+    Dadurch kann die Binary aus dem Build-Verzeichnis gestartet werden, während
+    die Konfigurationsdatei im eigentlichen
+    \texttt{rust\_service}-Ordner verbleibt.
+
+    \subsection{Start der Rust-Binary}
+    \label{subsec:start-rust-binary}
+
+    Vor dem Start der Simulation wird eine eventuell vorhandene alte
+    \texttt{ir\_output.json} gelöscht:
+
+    \begin{lstlisting}[language=Python]
+    output_file = (
+        rust_service_dir / "ir_output.json"
+    )
+
+    if output_file.exists():
+        output_file.unlink()
+    \end{lstlisting}
+
+    Dieser Schritt verhindert, dass nach einem fehlgeschlagenen Rust-Lauf
+    versehentlich eine alte Ergebnisdatei eingelesen wird.
+
+    Ohne diese Löschung könnte eine veraltete Datei den Eindruck erwecken, dass die
+    aktuelle Simulation erfolgreich neue Daten erzeugt hat.
+
+    Die eigentliche Ausführung der Rust-Binary erfolgt anschließend über
+    \texttt{subprocess.run}:
+
+    \begin{lstlisting}[language=Python]
     result = subprocess.run(
         [str(rust_binary)],
         cwd=rust_service_dir,
         capture_output=True,
         text=True
     )
+    \end{lstlisting}
 
+    Der Parameter \texttt{cwd} legt das Arbeitsverzeichnis des Prozesses fest.
+
+    In diesem Fall wird der zuvor ermittelte
+    \texttt{rust\_service}-Ordner verwendet, damit Rust die Datei
+    \texttt{input\_config.json} findet und die Datei
+    \texttt{ir\_output.json} an der erwarteten Stelle erzeugt.
+
+    Mit \texttt{capture\_output=True} werden die Ausgaben des Rust-Prozesses
+    gesammelt. Dadurch können \texttt{stdout} und \texttt{stderr} im Fehlerfall
+    in die Fehlermeldung übernommen werden.
+
+    Der Parameter \texttt{text=True} sorgt dafür, dass diese Ausgaben als Text
+    und nicht als Byte-Daten verarbeitet werden.
+
+    \subsection{Fehlerbehandlung und JSON-Ingestion}
+    \label{subsec:error-handling-json}
+
+    Nach dem Prozessstart wird zunächst der Rückgabecode der Rust-Binary geprüft.
+
+    Ein Rückgabecode ungleich null zeigt an, dass der Rust-Prozess fehlgeschlagen
+    ist:
+
+    \begin{lstlisting}[language=Python]
     if result.returncode != 0:
-        raise RuntimeError("Rust-Binary ist fehlgeschlagen.")
+        raise RuntimeError(
+            "Rust-Binary ist fehlgeschlagen.\n"
+            f"Returncode: "
+            f"{result.returncode}\n\n"
+            f"STDOUT:\n"
+            f"{result.stdout}\n\n"
+            f"STDERR:\n"
+            f"{result.stderr}"
+        )
+    \end{lstlisting}
 
-    with output_file.open("r", encoding="utf-8") as file:
-        ir_data = json.load(file)
+    Die Fehlermeldung enthält neben dem Returncode auch die Standardausgabe und die
+    Fehlerausgabe des Rust-Prozesses.
+
+    Das ist besonders wichtig, da die Ursache eines Fehlers häufig nicht in
+    Python, sondern in der extern gestarteten Rust-Binary liegt.
+
+    Anschließend wird geprüft, ob die erwartete Datei
+    \texttt{ir\_output.json} tatsächlich erzeugt wurde:
+
+    \begin{lstlisting}[language=Python]
+    if not output_file.exists():
+        raise FileNotFoundError(
+            "Rust wurde ausgefuehrt, aber "
+            "ir_output.json wurde nicht "
+            "gefunden: "
+            f"{output_file}"
+        )
+    \end{lstlisting}
+
+    Diese Prüfung deckt den Fall ab, dass der Rust-Prozess zwar ohne Fehlercode
+    beendet wurde, aber trotzdem keine Ausgabedatei erzeugt hat.
+
+    Auch dieser Fall wird dadurch mit einer eindeutigen Fehlermeldung behandelt.
+
+    Nach erfolgreicher Ausführung wird die JSON-Datei geöffnet und mit
+    \texttt{json.load} in ein Python-Dictionary umgewandelt:
+
+    \begin{lstlisting}[language=Python]
+    try:
+        with output_file.open(
+            "r",
+            encoding="utf-8"
+        ) as file:
+            ir_data = json.load(file)
+
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "ir_output.json ist keine "
+            "gueltige JSON-Datei: "
+            f"{output_file}"
+        ) from error
 
     return ir_data
     \end{lstlisting}
 
-    Die Kommunikation zwischen Rust und Python erfolgt über die Datei
-    \texttt{ir\_output.json}. Dadurch bleibt die Physik-Simulation in Rust,
-    während Python die weitere Verarbeitung übernimmt. Die Lösung ist modular,
-    einfach testbar und benötigt keine speziellen Bindings wie \texttt{PyO3}.
+    Falls die Datei beschädigt ist oder kein gültiges JSON enthält, wird der
+    \texttt{JSONDecodeError} abgefangen und in eine verständlichere Fehlermeldung
+    umgewandelt.
 
-    Die Funktion wurde anschließend mit der Testdatei
-    \texttt{test\_rust\_runner\_manual.py} überprüft. Dabei wurde bestätigt,
-    dass die von Rust erzeugte JSON-Datei erfolgreich geladen wird und die
-    Datenstruktur die erwarteten Schlüssel \texttt{metadata} und \texttt{hits}
-    enthält.
+    Dadurch wird verhindert, dass fehlerhafte Ergebnisdaten unbemerkt an die
+    weiteren Verarbeitungsschritte weitergegeben werden.
+
+    \subsection{Manueller Ende-zu-Ende-Test}
+    \label{subsec:end-to-end-test}
+
+    Zur Überprüfung der Schnittstelle wurde die Datei
+    \texttt{test\_rust\_runner\_manual.py} erstellt.
+
+    Dieser Test startet die Rust-Binary über die Runner-Funktion und prüft
+    anschließend, ob die erzeugte JSON-Struktur korrekt geladen wurde.
+
+    \begin{lstlisting}[language=Python]
+    from rust_runner import (
+        run_rust_and_load_json
+    )
+
+    def main():
+        print("Testing Rust runner...")
+
+        rust_binary = (
+            "../rust_service/target/release/"
+            "rust_service.exe"
+        )
+
+        json_output = "ir_output.json"
+
+        ir_data = run_rust_and_load_json(
+            rust_binary,
+            json_output
+        )
+
+        print(type(ir_data))
+        print(ir_data.keys())
+        print(ir_data["metadata"])
+        print(ir_data["hits"].keys())
+    \end{lstlisting}
+
+    Der Test kontrolliert zunächst, ob ein Python-Dictionary zurückgegeben wird.
+
+    Danach werden die obersten Schlüssel der JSON-Struktur ausgegeben. Erwartet
+    werden insbesondere die Bereiche \texttt{metadata} und \texttt{hits}.
+
+    Innerhalb von \texttt{hits} werden die Arrays
+    \texttt{delays\_seconds} und \texttt{pressures} erwartet.
+
+    Zusätzlich werden die Längen der beiden Ergebnislisten ausgegeben:
+
+    \begin{lstlisting}[language=Python]
+    delays = (
+        ir_data["hits"]["delays_seconds"]
+    )
+
+    pressures = (
+        ir_data["hits"]["pressures"]
+    )
+
+    print(len(delays))
+    print(len(pressures))
+    \end{lstlisting}
+
+    Dadurch kann kontrolliert werden, ob beide Listen vorhanden und plausibel
+    gefüllt sind.
+
+    Der Test dient damit als einfache Ende-zu-Ende-Prüfung der Verbindung zwischen
+    Python und Rust.
+
+    \subsection{Bewertung der Architektur}
+    \label{subsec:architecture-evaluation}
+
+    Die Kommunikation zwischen Python und Rust erfolgt bewusst über die Datei
+    \texttt{ir\_output.json}.
+
+    Diese Lösung ist nachvollziehbar, modular und benötigt keine direkten
+    Rust-Python-Bindings wie beispielsweise \texttt{PyO3}. Dadurch bleiben beide
+    Projektteile unabhängig voneinander ausführbar und können getrennt getestet
+    werden.
+
+    Ein wesentlicher Vorteil ist die klare Trennung der Verantwortlichkeiten:
+
+    \begin{itemize}
+        \item Rust berechnet die physikalische Simulation.
+        \item Python startet und überwacht den Rust-Prozess.
+        \item Python prüft die erzeugten Ausgabedaten.
+        \item Python übernimmt die weitere Verarbeitung der Ergebnisse.
+    \end{itemize}
+
+    Die implementierte Fehlerbehandlung sorgt dafür, dass fehlende Dateien,
+    falsche Pfade, fehlgeschlagene Rust-Prozesse und ungültige JSON-Ausgaben früh
+    erkannt werden.
+
+    Eine Einschränkung dieser Architektur besteht darin, dass die Kommunikation
+    über eine Datei zusätzlichen Datei-I/O verursacht.
+
+    Bei sehr großen Simulationen kann das Schreiben und anschließende Einlesen der
+    JSON-Datei einen relevanten Anteil der Gesamtlaufzeit ausmachen. Die gemessenen
+    Auswirkungen dieses Datei-I/O werden in
+    Abschnitt~\ref{sec:benchmarks} genauer untersucht.
+
+    Eine mögliche spätere Optimierung wäre die Datenübertragung über Streams oder
+    eine direkte Rust-Python-Bindung.
+
+    Für die aktuelle Projektstruktur wurde die JSON-basierte Schnittstelle jedoch
+    bewusst gewählt, da sie transparent, robust und einfach testbar ist.
+
+    Damit bildet \texttt{rust\_runner.py} die technische Verbindung zwischen dem
+    Rust-Kern und der späteren Python-basierten Audioverarbeitung.
 
 
     \section{Leistungsoptimierungen und Profiling}
-        \label{sec:optimizations}
+    \label{sec:optimizations}
     Benchmarking the compiled binary (utilizing Rust's \texttt{--release} flag for maximum LLVM optimization)
     revealed significant bottlenecks and subsequent optimization opportunities within the parallelized architecture.
 
