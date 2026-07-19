@@ -23,6 +23,562 @@ Die Richtung des reflektierten Strahls $\vec{R}$ wird bestimmt, indem von der Ri
 \[\vec{R} = \vec{D} - 2(\vec{D} \cdot \vec{N})\vec{N}\]
 Innerhalb der Rust-Codebasis wird diese Berechnung durch die \texttt{reflect} Methode des \texttt{glam}-Crates optimiert, die SIMD-Instruktionen für minimalen Overhead nutzt.
 
+
+\subsection{Umstellung auf 3D: \texttt{Vec3} und Möller-Trumbore-Algorithmus}
+\label{subsec:3d_migration}
+
+Die aktuelle Implementierung der Physik-Engine arbeitet vollständig im
+dreidimensionalen Raum. Im Vergleich zur ursprünglichen zweidimensionalen
+Grundidee mussten dafür insbesondere die geometrischen Datenstrukturen, die
+Raummodellierung und die Kollisionsberechnung angepasst werden.
+
+Ziel dieser Umstellung war es, Schallstrahlen nicht mehr ausschließlich in
+einer Ebene zu simulieren, sondern ihre Ausbreitung in einem Raum mit Breite,
+Tiefe und Höhe abzubilden. Positionen und Richtungen werden daher nicht mehr
+mit zwei Koordinaten, sondern mit dem Datentyp \texttt{Vec3} beschrieben. Ein
+Punkt im dreidimensionalen Raum besitzt eine \(x\)-, \(y\)- und
+\(z\)-Koordinate:
+
+\[
+    P = (x,y,z)
+\]
+
+Diese Erweiterung betrifft insbesondere die Positionen von Lautsprecher und
+Mikrofon, die Ursprünge und Richtungen der Strahlen sowie die berechneten
+Reflexionspunkte an den Raumflächen. Während Wände in der zweidimensionalen
+Version als Liniensegmente modelliert werden konnten, müssen sie in der
+3D-Simulation als Flächen behandelt werden. Die Raumflächen werden deshalb aus
+Dreiecken aufgebaut. Zur Berechnung der Schnittpunkte zwischen einem Strahl
+und diesen Dreiecken wird der Möller-Trumbore-Algorithmus verwendet.
+
+\subsubsection{Neue 3D-Datenstrukturen: \texttt{Ray} und \texttt{Triangle}}
+\label{subsubsec:ray_triangle}
+
+Die Grundlage der Umstellung war die Anpassung der zentralen Datenstrukturen.
+Ein Schallstrahl wird in der neuen Implementierung durch die Struktur
+\texttt{Ray} beschrieben. Diese enthält den aktuellen Ursprung des Strahls und
+seine Richtung im dreidimensionalen Raum:
+
+\begin{lstlisting}[language=Rust]
+pub struct Ray {
+    pub origin: Vec3,
+    pub direction: Vec3,
+}
+\end{lstlisting}
+
+Der Wert \texttt{origin} beschreibt den aktuellen Startpunkt des Strahls. Zu
+Beginn entspricht dieser Punkt der Lautsprecherposition. Nach jeder Reflexion
+wird der berechnete Trefferpunkt an einer Fläche zum neuen Ursprung des
+reflektierten Strahls. Der Wert \texttt{direction} beschreibt die
+Ausbreitungsrichtung. Dieser Richtungsvektor wird normalisiert verwendet, damit
+nur seine Richtung und nicht seine Länge eine Rolle spielt.
+
+Auch die Modellierung der Raumflächen musste verändert werden. In der
+zweidimensionalen Version konnten Wände als Liniensegmente dargestellt werden.
+In einem dreidimensionalen Raum muss ein Strahl jedoch mit Flächen kollidieren.
+Aus diesem Grund werden Raumflächen nun als Dreiecke modelliert:
+
+\begin{lstlisting}[language=Rust]
+pub struct Triangle {
+    pub v0: Vec3,
+    pub v1: Vec3,
+    pub v2: Vec3,
+    pub absorption: f32,
+}
+\end{lstlisting}
+
+Ein Dreieck besteht aus den drei Eckpunkten \texttt{v0}, \texttt{v1} und
+\texttt{v2}. Diese Punkte definieren eindeutig eine Fläche im
+3D-Raum. Zusätzlich besitzt jedes Dreieck einen Absorptionswert, der beschreibt,
+wie stark ein Schallstrahl bei einer Reflexion an der jeweiligen Fläche
+abgeschwächt wird. Damit enthält die Struktur neben der geometrischen
+Beschreibung auch eine akustische Eigenschaft.
+
+\subsubsection{Ablösung des 2D-Segment-Schnitts}
+\label{subsubsec:replace_2d_intersection}
+
+Der vorherige Schnittpunktalgorithmus war auf zweidimensionale
+Strahl-Segment-Schnitte ausgelegt. Dabei wurde geprüft, ob ein Strahl eine
+Wandlinie innerhalb eines begrenzten Segments trifft. Dieses Verfahren ist für
+einen dreidimensionalen Raum nicht ausreichend, da Wände, Boden und Decke nicht
+als Linien, sondern als Flächen betrachtet werden müssen.
+
+Für die 3D-Version wurde daher auf Strahl-Dreieck-Schnittpunkte umgestellt.
+Dreiecke eignen sich besonders für diese Aufgabe, da sie stets planar sind und
+komplexe Flächen aus mehreren Dreiecken zusammengesetzt werden können. Dadurch
+kann die Simulation nicht nur einfache rechteckige Räume, sondern grundsätzlich
+auch komplexere polygonale Geometrien verarbeiten.
+
+\subsubsection{Aufbau des 3D-Raums aus Dreiecken}
+\label{subsubsec:room_triangles}
+
+Obwohl der Schnittpunktalgorithmus mit Dreiecken arbeitet, bestehen einfache
+Raumflächen wie Boden, Decke oder Wände meistens aus Rechtecken. Deshalb wird
+jede rechteckige Raumfläche in zwei Dreiecke zerlegt. Dies geschieht in der
+Hilfsfunktion \texttt{add\_rect\_as\_two\_triangles}:
+
+\begin{lstlisting}[language=Rust]
+fn add_rect_as_two_triangles(
+    triangles: &mut Vec<Triangle>,
+    a: Vec3,
+    b: Vec3,
+    c: Vec3,
+    d: Vec3,
+    absorption: f32,
+) {
+    triangles.push(Triangle {
+        v0: a,
+        v1: b,
+        v2: c,
+        absorption,
+    });
+
+    triangles.push(Triangle {
+        v0: a,
+        v1: c,
+        v2: d,
+        absorption,
+    });
+}
+\end{lstlisting}
+
+Das erste Dreieck besteht aus den Punkten \texttt{a}, \texttt{b} und
+\texttt{c}. Das zweite Dreieck besteht aus den Punkten \texttt{a}, \texttt{c}
+und \texttt{d}. Zusammen bilden beide Dreiecke wieder die vollständige
+rechteckige Fläche. Dadurch kann der Möller-Trumbore-Algorithmus einheitlich auf
+alle Raumflächen angewendet werden.
+
+Im Hauptprogramm wird zunächst eine Liste für alle Dreiecke des Raums angelegt:
+
+\begin{lstlisting}[language=Rust]
+let mut room: Vec<Triangle> = Vec::new();
+\end{lstlisting}
+
+Anschließend werden Boden, Decke und die vier Wände des Testraums hinzugefügt.
+Der Raum besitzt im Testaufbau eine Breite von \(10{,}0\), eine Tiefe von
+\(10{,}0\) und eine Höhe von \(3{,}0\). Das Koordinatensystem ist so aufgebaut,
+dass \(x\) die horizontale Richtung, \(y\) die Tiefe des Raums und \(z\) die
+Höhe beschreibt. Ein Beispiel ist der Boden des Raums:
+
+\begin{lstlisting}[language=Rust]
+add_rect_as_two_triangles(
+    &mut room,
+    Vec3::new(0.0, 0.0, 0.0),
+    Vec3::new(width, 0.0, 0.0),
+    Vec3::new(width, depth, 0.0),
+    Vec3::new(0.0, depth, 0.0),
+    absorption,
+);
+\end{lstlisting}
+
+Alle vier Punkte besitzen hier die \(z\)-Koordinate \(0{,}0\), da sich der
+Boden auf der Höhe null befindet. Für die Decke wird dagegen die
+\(z\)-Koordinate \texttt{height} verwendet. Bei den Wänden bleibt jeweils eine
+Koordinate konstant, während die beiden anderen Koordinaten die jeweilige
+Wandfläche aufspannen.
+
+\subsubsection{Möller-Trumbore-Algorithmus}
+\label{subsubsec:moller_trumbore}
+
+Zur Berechnung von Strahl-Dreieck-Schnittpunkten wurde der
+Möller-Trumbore-Algorithmus implementiert. Dieser Algorithmus wird häufig im
+Raytracing verwendet, da er direkt prüft, ob ein Strahl ein Dreieck trifft, ohne
+zuvor explizit die Ebenengleichung des Dreiecks bestimmen zu müssen.
+
+Die Funktion \texttt{check\_intersection} bildet den Kern dieser
+Schnittpunktprüfung. Sie erhält einen Strahl und ein Dreieck. Falls ein gültiger
+Treffer existiert, gibt sie einen neuen reflektierten Strahl zurück. Liegt kein
+gültiger Treffer vor, wird \texttt{None} zurückgegeben.
+
+Zunächst werden aus den drei Eckpunkten des Dreiecks zwei Kantenvektoren
+berechnet:
+
+\begin{lstlisting}[language=Rust]
+let edge1 = triangle.v1 - triangle.v0;
+let edge2 = triangle.v2 - triangle.v0;
+\end{lstlisting}
+
+Diese beiden Kantenvektoren spannen die Dreiecksfläche im Raum auf.
+Anschließend wird ein Kreuzprodukt zwischen der Strahlrichtung und der zweiten
+Dreieckskante gebildet:
+
+\begin{lstlisting}[language=Rust]
+let h = ray.direction.cross(edge2);
+let a = edge1.dot(h);
+\end{lstlisting}
+
+Der Wert \texttt{a} zeigt an, ob der Strahl parallel zur Dreiecksfläche
+verläuft. Ist dieser Wert nahe null, kann kein eindeutiger Schnittpunkt
+berechnet werden. Deshalb wird mit einem kleinen Epsilon-Wert gearbeitet:
+
+\begin{lstlisting}[language=Rust]
+let epsilon = 1e-6;
+
+if a.abs() < epsilon {
+    return None;
+}
+\end{lstlisting}
+
+Diese Toleranz ist notwendig, da Gleitkommazahlen nicht immer exakt berechnet
+werden. Ohne den Schwellenwert könnten numerische Rundungsfehler zu falschen
+Treffern führen.
+
+Anschließend wird die erste baryzentrische Koordinate \(u\) berechnet:
+
+\begin{lstlisting}[language=Rust]
+let f = 1.0 / a;
+let s = ray.origin - triangle.v0;
+let u = f * s.dot(h);
+
+if u < 0.0 || u > 1.0 {
+    return None;
+}
+\end{lstlisting}
+
+Liegt \(u\) außerhalb des Bereichs von \(0{,}0\) bis \(1{,}0\), trifft der
+Strahl möglicherweise die Ebene des Dreiecks, aber nicht die begrenzte
+Dreiecksfläche selbst. Danach wird die zweite baryzentrische Koordinate \(v\)
+berechnet:
+
+\begin{lstlisting}[language=Rust]
+let q = s.cross(edge1);
+let v = f * ray.direction.dot(q);
+
+if v < 0.0 || u + v > 1.0 {
+    return None;
+}
+\end{lstlisting}
+
+Die Bedingung \(u + v > 1{,}0\) stellt sicher, dass sich der Trefferpunkt nicht
+außerhalb des Dreiecks befindet. Ein gültiger Treffer liegt nur dann vor, wenn
+die baryzentrischen Koordinaten innerhalb der Dreiecksgrenzen bleiben.
+
+Zum Schluss wird der Parameter \(t\) berechnet. Dieser beschreibt die Entfernung
+des Schnittpunkts entlang der Strahlrichtung:
+
+\begin{lstlisting}[language=Rust]
+let t = f * edge2.dot(q);
+
+if t < 0.001 {
+    return None;
+}
+\end{lstlisting}
+
+Negative oder sehr kleine Werte werden verworfen, damit Treffer hinter dem
+Ursprung oder unmittelbar am Startpunkt nicht berücksichtigt werden. Die
+Ursache und die diagnostische Untersuchung solcher Selbsttreffer werden in
+Abschnitt~\ref{subsec:epsilon_fix} ausführlicher behandelt.
+
+\subsubsection{Reflexionsberechnung im 3D-Raum}
+\label{subsubsec:3d_reflection}
+
+Die zugrunde liegende Reflexionsgleichung entspricht der bereits im
+2D-Abschnitt beschriebenen Vektorreflexion. Im dreidimensionalen Fall wird die
+Oberflächennormale jedoch nicht aus einem zweidimensionalen Wandvektor, sondern
+aus den beiden Kantenvektoren des getroffenen Dreiecks berechnet.
+
+Sobald ein gültiger Schnittpunkt gefunden wurde, wird zunächst der tatsächliche
+Trefferpunkt im dreidimensionalen Raum bestimmt:
+
+\begin{lstlisting}[language=Rust]
+let hit_point = ray.origin + ray.direction * t;
+\end{lstlisting}
+
+Dieser Punkt wird anschließend zum neuen Ursprung des reflektierten Strahls.
+Danach wird die Oberflächennormale des Dreiecks berechnet. Sie steht senkrecht
+auf der Dreiecksfläche und ergibt sich aus dem Kreuzprodukt der beiden
+Kantenvektoren:
+
+\begin{lstlisting}[language=Rust]
+let normal = edge1.cross(edge2).normalize();
+\end{lstlisting}
+
+Die neue Richtung des Schallstrahls wird berechnet, indem die ursprüngliche
+Richtung an dieser Normalen gespiegelt wird:
+
+\begin{lstlisting}[language=Rust]
+let bounced_direction =
+    ray.direction.reflect(normal).normalize();
+\end{lstlisting}
+
+Die Methode \texttt{reflect} des \texttt{glam}-Crates übernimmt die
+mathematische Spiegelung des Richtungsvektors. Anschließend wird die neue
+Richtung normalisiert, damit sie weiterhin als Einheitsvektor verwendet werden
+kann.
+
+Die geometrische Beziehung zwischen einfallendem Strahl,
+Oberflächennormale und reflektiertem Strahl ist in
+Abbildung~\ref{fig:reflection_side_view} dargestellt.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        scale=1.1,
+        >=Latex,
+        rayin/.style={->, thick, blue},
+        rayout/.style={->, thick, green!60!black},
+        normal/.style={->, thick, red}
+    ]
+        \draw[very thick] (-3,0) -- (3,0);
+        \node[below right=5pt] at (1.25,0) {Dreiecksfläche};
+
+        \fill (0,0) circle (2pt);
+        \node[below=6pt] at (0,0) {Trefferpunkt};
+
+        \draw[normal] (0,0) -- (0,3);
+        \node[red, right=5pt] at (0,2.35) {Normale $\vec{N}$};
+
+        \draw[rayin] (-3,2.2) -- (0,0);
+        \node[blue] at (-2.15,1.55) {einfallender Strahl};
+        \node[blue] at (-1.55,0.95) {$\vec{d}$};
+
+        \draw[rayout] (0,0) -- (3,2.2);
+        \node[green!60!black] at (2.15,1.55) {reflektierter Strahl};
+
+        \draw (0,0.75) arc[start angle=90, end angle=143.7, radius=0.75];
+        \draw (0,0.75) arc[start angle=90, end angle=36.3, radius=0.75];
+
+        \node at (-0.43,0.95) {$\theta_i$};
+        \node at (0.43,0.95) {$\theta_r$};
+        \node at (0,-1.05) {$\theta_i = \theta_r$};
+    \end{tikzpicture}
+    \caption{Vereinfachte Seitenansicht der Reflexion an einer Dreiecksfläche. Einfallswinkel \(\theta_i\) und Reflexionswinkel \(\theta_r\) werden relativ zur Oberflächennormalen gemessen und sind gleich groß.}
+    \label{fig:reflection_side_view}
+\end{figure}
+
+Die Funktion gibt schließlich einen neuen Strahl zurück:
+
+\begin{lstlisting}[language=Rust]
+Some(Ray {
+    origin: hit_point,
+    direction: bounced_direction,
+})
+\end{lstlisting}
+
+Der reflektierte Strahl startet somit am berechneten Trefferpunkt und bewegt
+sich in der neuen Reflexionsrichtung weiter. Dadurch können mehrere Reflexionen
+eines Schallstrahls nacheinander simuliert werden.
+
+\subsubsection{Mikrofonerkennung im 3D-Raum}
+\label{subsubsec:3d_microphone}
+
+Neben der Reflexion an Dreiecksflächen musste auch die Erkennung eines
+Mikrofontreffers an den dreidimensionalen Raum angepasst werden. Das Mikrofon
+wird in der Simulation als Kugel mit einem konfigurierbaren Radius betrachtet.
+Ein Strahl muss daher nicht exakt den Mittelpunkt des Mikrofons treffen, sondern
+nur nahe genug an diesem vorbeifliegen.
+
+Die Funktion \texttt{check\_mic\_intersection} prüft hierfür den Abstand
+zwischen einem Strahlsegment und dem Mikrofonmittelpunkt. Wichtig ist, dass
+nicht der unendliche Strahl betrachtet wird, sondern nur das konkrete Segment
+zwischen dem Startpunkt des aktuellen Strahls und dem nächsten Trefferpunkt an
+einer Fläche:
+
+\begin{lstlisting}[language=Rust]
+pub fn check_mic_intersection(
+    start: Vec3,
+    end: Vec3,
+    mic_center: Vec3,
+    mic_radius: f32,
+) -> bool {
+    let segment = end - start;
+    let segment_length_sq = segment.length_squared();
+
+    if segment_length_sq == 0.0 {
+        return start.distance(mic_center) <= mic_radius;
+    }
+
+    let to_mic = mic_center - start;
+    let t = to_mic.dot(segment) / segment_length_sq;
+    let clamped_t = t.clamp(0.0, 1.0);
+    let closest_point = start + segment * clamped_t;
+
+    closest_point.distance(mic_center) <= mic_radius
+}
+\end{lstlisting}
+
+Zunächst wird der Segmentvektor zwischen Start- und Endpunkt berechnet. Danach
+wird der Mikrofonmittelpunkt auf dieses Segment projiziert. Der berechnete
+Projektionswert wird mit \texttt{clamp(0.0, 1.0)} begrenzt. Dadurch wird
+sichergestellt, dass nur das tatsächliche Segment und nicht die unendliche
+Verlängerung des Strahls betrachtet wird.
+
+Anschließend wird der Punkt auf dem Segment berechnet, der dem Mikrofon am
+nächsten liegt. Ist der Abstand zwischen diesem Punkt und dem
+Mikrofonmittelpunkt kleiner oder gleich dem Mikrofonradius, wird ein Treffer
+registriert. Diese Methode ist robuster als eine reine Punktprüfung, da es bei
+zufällig ausgesendeten Strahlen sehr unwahrscheinlich wäre, den exakten
+Mittelpunkt des Mikrofons zu treffen.
+
+\subsubsection{Integration in die Simulationsschleife}
+\label{subsubsec:simulation_loop}
+
+Die neue Schnittpunktprüfung wird in der Simulationslogik verwendet, um jeden
+einzelnen Schallstrahl über mehrere Reflexionen hinweg zu verfolgen. Zunächst
+wird ein zufälliger Startstrahl an der Lautsprecherposition erzeugt:
+
+\begin{lstlisting}[language=Rust]
+fn generate_initial_ray(
+    config: &SimulationConfig
+) -> Ray {
+    let mut rng = rand::rng();
+    let theta: f32 =
+        rng.random_range(0.0..(2.0 * PI));
+    let z: f32 =
+        rng.random_range(-1.0..1.0);
+    let r = (1.0_f32 - z * z).sqrt();
+
+    let direction = Vec3::new(
+        r * theta.cos(),
+        r * theta.sin(),
+        z,
+    ).normalize();
+
+    Ray {
+        origin: config.speaker_position,
+        direction,
+    }
+}
+\end{lstlisting}
+
+Anders als in einer zweidimensionalen Simulation reicht hier kein einzelner
+Winkel in einer Ebene aus. Stattdessen wird eine zufällige Richtung auf der
+Einheitskugel erzeugt. Der Winkel \(\theta\) beschreibt die Richtung um die
+\(z\)-Achse. Der Wert \(z\) bestimmt den Anteil der Richtung nach oben oder
+unten. Aus diesen Werten entsteht ein normalisierter
+\texttt{Vec3}-Richtungsvektor.
+
+Für die eigentliche Kollision wird in der Funktion \texttt{cast\_ray} das
+nächstgelegene getroffene Dreieck gesucht:
+
+\begin{lstlisting}[language=Rust]
+for triangle in triangles {
+    if let Some(bounced_ray) =
+        geometry::check_intersection(ray, triangle)
+    {
+        let distance =
+            ray.origin.distance(bounced_ray.origin);
+
+        if distance < shortest_distance {
+            shortest_distance = distance;
+            closest_bounced_ray = Some((
+                bounced_ray,
+                triangle.absorption
+            ));
+        }
+    }
+}
+\end{lstlisting}
+
+Dabei wird jedes Dreieck des Raums geprüft. Wenn mehrere gültige Treffer
+existieren, wird der Treffer mit der kürzesten Distanz ausgewählt. Dies ist
+notwendig, da ein Strahl zuerst auf die nächstgelegene Fläche treffen muss und
+nicht auf eine weiter entfernte Fläche dahinter.
+
+In der Funktion \texttt{simulate\_single\_ray} wird dieser Ablauf über mehrere
+Reflexionen wiederholt. Nach jedem Treffer wird geprüft, ob der Strahl auf
+seinem Flugsegment am Mikrofon vorbeigeflogen ist:
+
+\begin{lstlisting}[language=Rust]
+if geometry::check_mic_intersection(
+    start_point,
+    end_point,
+    config.mic_position,
+    config.mic_radius,
+) {
+    let distance_to_mic =
+        start_point.distance(config.mic_position);
+
+    let total_distance_at_hit =
+        total_distance + distance_to_mic;
+
+    if total_distance_at_hit > 0.001 {
+        ray_hits.push((
+            total_distance_at_hit / 343.0,
+            current_pressure,
+        ));
+    }
+}
+\end{lstlisting}
+
+Wird ein Mikrofontreffer erkannt, werden die Ankunftszeit und der aktuelle
+Druckwert gespeichert. Die Ankunftszeit wird in der aktuellen Implementierung
+näherungsweise über die zurückgelegte Strecke berechnet und anschließend durch
+die Schallgeschwindigkeit geteilt. Dafür wird der Näherungswert
+\(343{,}0\,\mathrm{m/s}\) verwendet.
+
+Entsprechend dem beschriebenen Absorptionsmodell wird der aktuelle Druckwert
+nach jeder Reflexion reduziert:
+
+\begin{lstlisting}[language=Rust]
+current_pressure *= 1.0 - absorption;
+
+if current_pressure < config.min_pressure {
+    break;
+}
+\end{lstlisting}
+
+Der Absorptionswert der getroffenen Fläche bestimmt, wie stark der Strahl nach
+der Reflexion abgeschwächt wird. Sinkt der Druck unter den konfigurierten
+Mindestwert, wird die Simulation dieses Strahls beendet. Dadurch werden sehr
+leise und für das Ergebnis kaum relevante Reflexionen nicht unnötig
+weiterberechnet.
+
+\subsubsection{Konfiguration der 3D-Simulation}
+\label{subsubsec:3d_config}
+
+Die Parameter der Simulation werden aus der Datei
+\texttt{input\_config.json} geladen. Die zugehörige Struktur
+\texttt{SimulationConfig} enthält unter anderem die maximale Anzahl an
+Reflexionen, den minimalen Druckwert, den Mikrofonradius, die Anzahl der
+auszusendenden Strahlen sowie die Positionen von Lautsprecher und Mikrofon:
+
+\begin{lstlisting}[language=Rust]
+#[derive(Deserialize)]
+pub struct SimulationConfig {
+    pub max_bounces: u32,
+    pub min_pressure: f32,
+    pub mic_radius: f32,
+    pub mic_position: Vec3,
+    pub rays_to_cast: u32,
+    pub speaker_position: Vec3,
+}
+\end{lstlisting}
+
+Auch an dieser Stelle zeigt sich die Umstellung auf den dreidimensionalen Raum:
+Sowohl \texttt{mic\_position} als auch \texttt{speaker\_position} sind nun vom
+Typ \texttt{Vec3}. In der Konfigurationsdatei werden diese Positionen deshalb
+als Arrays mit drei Zahlen angegeben:
+
+\begin{lstlisting}
+{
+  "max_bounces": 32,
+  "min_pressure": 0.001,
+  "mic_radius": 1.5,
+  "mic_position": [5.0, 5.0, 1.5],
+  "rays_to_cast": 1000000,
+  "speaker_position": [2.0, 2.0, 1.5]
+}
+\end{lstlisting}
+
+Die dritte Koordinate beschreibt die Höhe im Raum. Die Lautsprecherposition
+\texttt{[2.0, 2.0, 1.5]} bedeutet beispielsweise, dass der Lautsprecher bei
+\(x = 2{,}0\), \(y = 2{,}0\) und einer Höhe von \(z = 1{,}5\) Metern platziert
+ist. Gleiches gilt für die Mikrofonposition. Dadurch kann die Simulation die
+Schallausbreitung nicht nur auf einer zweidimensionalen Ebene, sondern innerhalb
+eines vollständigen 3D-Raums berechnen.
+
+\subsubsection{Ergebnis der Umstellung}
+\label{subsubsec:3d_result}
+
+Durch die Umstellung auf \texttt{Vec3} und dreiecksbasierte Raumflächen wurde
+die Beschränkung auf eine zweidimensionale Simulation aufgehoben. Die Engine
+kann nun räumliche Strahlengänge erzeugen, den jeweils nächstgelegenen
+Strahl-Dreieck-Schnittpunkt bestimmen und die Strahlen über mehrere Reflexionen
+hinweg verfolgen. Die Segment-Kugel-Prüfung ermöglicht dabei eine robuste
+Erkennung von Mikrofontreffern. Die vorhandene Trennung zwischen Geometrie,
+Simulation, Konfiguration und Export blieb trotz der Erweiterung erhalten.
+
 \subsection{Hochleistungs-Nebenläufigkeit und Datenparallelität}
 \label{subsec:concurrency}
 
@@ -69,6 +625,24 @@ config: &SimulationConfig, walls: &Vec<Wall>
 \label{subsec:visualizer}
 
 Da die Berechnung von Millionen stochastischer Strahlengänge in einem rein textbasierten Output nur schwer auf algorithmische Korrektheit überprüfbar ist, wurde eine Pipeline für visuelles Debugging entwickelt. Hierfür exportiert die Rust-Engine eine Teilmenge der Segmente in eine JSON-Datei (\texttt{visualisation\_data.json}).
+
+Die zugehörige Struktur \texttt{VisualizerOutput} speichert die
+Lautsprecherposition, die Mikrofonposition und die ausgewählten Strahlengänge
+ebenfalls als dreidimensionale Vektoren:
+
+\begin{lstlisting}[language=Rust]
+pub struct VisualizerOutput {
+    pub speaker: Vec3,
+    pub mic: Vec3,
+    pub mic_radius: f32,
+    pub rays: Vec<Vec<Vec3>>,
+}
+\end{lstlisting}
+
+Jeder Eintrag in \texttt{rays} beschreibt einen vollständigen Strahlengang als
+Folge dreidimensionaler Punkte. Dadurch lassen sich sowohl die Aussendung als
+auch die berechneten Reflexionspunkte räumlich überprüfen.
+
 
 \paragraph{Phase 1: Statische 2D-Visualisierung}
 In der initialen Phase wurde ein Python-Skript basierend auf \texttt{matplotlib} eingesetzt. Dieses Werkzeug parste die Daten und stellte sie in einem kartesischen 2D-Koordinatensystem grafisch dar. Es war maßgeblich für die Identifikation tiefliegender mathematischer Anomalien.
