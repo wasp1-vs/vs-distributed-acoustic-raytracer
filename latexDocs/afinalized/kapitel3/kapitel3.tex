@@ -19,6 +19,37 @@ Die Aufgabenverteilung im Team erfolgte nicht anhand eines im Voraus festgelegte
 \paragraph{Kommunikation und Herausforderungen}
 Die Abstimmung im Team erfolgte über regelmäßige Meetings sowie einen fortlaufenden Austausch über einen internen Kommunikationskanal. Eine zentrale organisatorische Herausforderung während der Projektlaufzeit war der unvorhergesehene Ausstieg des ursprünglichen Teammitglieds, das unter anderem für die redaktionelle Dokumentation zuständig war. Dessen Aufgaben mussten kurzfristig umverteilt werden, was zu einer temporären Verzögerung führte. Es wurde das Prinzip etabliert, dass alle Mitglieder bei Bedarf abteilungsübergreifend einspringen, um die Konsistenz des Gesamtprojekts zu gewährleisten.
 
+
+\subsection{Lokale Prozesskopplung zwischen Rust und Python}
+\label{subsec:lokale_prozesskopplung}
+
+Neben der verteilten Ausführung auf dem Cluster existiert eine lokale
+Prozesskopplung zwischen der Rust-Engine und dem Python-Dienst. Die
+Rust-Engine übernimmt die rechenintensive Simulation und exportiert die
+berechneten Strahltreffer in die Datei \texttt{ir\_output.json}. Der
+Python-Dienst startet die kompilierte Binary, überwacht ihre Ausführung und
+übergibt die eingelesenen Ergebnisdaten an die nachgelagerte
+Signalverarbeitung.
+
+\[
+    \text{Python-Dienst}
+    \rightarrow
+    \texttt{rust\_runner.py}
+    \rightarrow
+    \text{Rust-Binary}
+    \rightarrow
+    \texttt{ir\_output.json}
+    \rightarrow
+    \text{DSP-Pipeline}
+\]
+
+Die dateibasierte Kopplung hält beide Projektteile technisch voneinander
+getrennt. Rust bleibt für die performante Berechnung der akustischen Simulation
+verantwortlich, während Python die Ausführung koordiniert und die erzeugten
+Daten für die weitere Audioverarbeitung bereitstellt. Die konkrete
+Implementierung und Fehlerbehandlung dieser Prozessbrücke wird in
+Abschnitt~\ref{subsec:rust_runner} beschrieben.
+
 \subsection{Cluster-Infrastruktur und Parallelisierung}
 \label{subsec:cluster_architektur}
 

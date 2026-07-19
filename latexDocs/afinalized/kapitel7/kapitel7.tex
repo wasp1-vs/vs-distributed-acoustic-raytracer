@@ -61,6 +61,310 @@ Oktavband-Filterbank und verifiziert das Verhalten an zwei akustisch
 gegensätzlichen Materialien. Abschnitt~\ref{subsec:dsp-zusammenfassung} fasst
 die Ergebnisse zusammen.
 
+
+\subsection{Prozessbrücke zwischen Rust und Python}
+\label{subsec:rust_runner}
+
+Die Rust-Physik-Engine bildet den rechenintensiven Kern der Simulation. Um ihre
+Ergebnisse an die nachgelagerte Python-Pipeline zu übergeben, wurde eine
+Schnittstelle implementiert, die die kompilierte Rust-Binary aus Python heraus
+startet und anschließend die erzeugte Datei \texttt{ir\_output.json} einliest.
+
+Die Schnittstelle befindet sich in der Datei
+\texttt{python\_service/rust\_runner.py}. Ihre zentrale Funktion ist
+\texttt{run\_rust\_and\_load\_json}. Sie übernimmt die Orchestrierung zwischen
+Python und Rust: Python startet den Rust-Prozess, wartet auf dessen Abschluss,
+prüft die erzeugte Ausgabedatei und stellt die geladenen Daten anschließend als
+Python-Dictionary bereit.
+
+\[
+    \text{Python-Pipeline}
+    \rightarrow
+    \texttt{rust\_runner.py}
+    \rightarrow
+    \text{Rust-Binary}
+    \rightarrow
+    \texttt{ir\_output.json}
+    \rightarrow
+    \text{Python-Dictionary}
+\]
+
+\subsubsection{Aufgabe der Schnittstelle}
+\label{subsubsec:runner_aufgabe}
+
+Die Funktion \texttt{run\_rust\_and\_load\_json} erhält zwei Parameter: den
+Pfad zur kompilierten Rust-Binary und den erwarteten Namen der
+JSON-Ausgabedatei. Beide Werte werden zunächst in \texttt{Path}-Objekte
+umgewandelt, damit Pfade plattformunabhängig und zuverlässig verarbeitet werden
+können.
+
+\begin{lstlisting}[language=Python]
+def run_rust_and_load_json(
+    rust_binary_path: str,
+    json_path: str
+) -> dict:
+    rust_binary = Path(
+        rust_binary_path
+    ).resolve()
+
+    json_file = Path(json_path)
+\end{lstlisting}
+
+Der Rückgabetyp der Funktion ist ein \texttt{dict}. Dadurch stehen die von Rust
+erzeugten Daten nach erfolgreicher Ausführung direkt als Python-Dictionary zur
+Verfügung. Spätere Pipeline-Schritte müssen die JSON-Datei daher nicht erneut
+selbst öffnen und parsen.
+
+Die Schnittstelle erfüllt drei zentrale Aufgaben:
+
+\begin{itemize}
+    \item Start der Rust-Binary als externer Prozess,
+    \item Prüfung und Validierung der Ausführung,
+    \item Einlesen der erzeugten Datei \texttt{ir\_output.json}.
+\end{itemize}
+
+\subsubsection{Pfadprüfung und Arbeitsverzeichnis}
+\label{subsubsec:runner_path}
+
+Vor dem Start der Rust-Binary wird geprüft, ob der übergebene Pfad existiert und
+ob es sich tatsächlich um eine Datei handelt. Dadurch werden ungültige
+Pfadkonfigurationen bereits vor dem Start des Subprozesses abgefangen.
+
+\begin{lstlisting}[language=Python]
+if not rust_binary.exists():
+    raise FileNotFoundError(
+        "Rust-Binary nicht gefunden: "
+        f"{rust_binary}"
+    )
+
+if not rust_binary.is_file():
+    raise FileNotFoundError(
+        "Pfad ist keine Datei: "
+        f"{rust_binary}"
+    )
+\end{lstlisting}
+
+Diese Prüfung verbessert die Robustheit der Schnittstelle. Ein falscher Pfad
+führt dadurch nicht zu einem schwer nachvollziehbaren Fehler innerhalb von
+\texttt{subprocess.run}, sondern zu einer klaren und verständlichen
+Fehlermeldung.
+
+Zusätzlich wird geprüft, ob als erwartete Ausgabedatei tatsächlich
+\texttt{ir\_output.json} übergeben wurde:
+
+\begin{lstlisting}[language=Python]
+if json_file.name != "ir_output.json":
+    raise ValueError(
+        "Rust exportiert aktuell fest nach "
+        "'ir_output.json'. "
+        "Uebergeben wurde aber: "
+        f"{json_file.name}"
+    )
+\end{lstlisting}
+
+Diese Prüfung ist notwendig, weil die Rust-Seite aktuell fest in eine Datei mit
+dem Namen \texttt{ir\_output.json} exportiert. Würde Python eine andere Datei
+erwarten, würde die Schnittstelle nach der Ausführung an der falschen Stelle
+suchen. Die Prüfung verhindert damit eine inkonsistente Annahme zwischen Rust
+und Python.
+
+Ein weiterer wichtiger Punkt ist das Arbeitsverzeichnis. Die Rust-Simulation
+benötigt die Datei \texttt{input\_config.json}. Da sich die kompilierte Binary
+typischerweise in einem Unterordner wie \texttt{target/release} befindet, wird
+der passende Projektordner automatisch gesucht:
+
+\begin{lstlisting}[language=Python]
+rust_service_dir = rust_binary.parent
+
+for parent in rust_binary.parents:
+    config_file = (
+        parent / "input_config.json"
+    )
+
+    if config_file.exists():
+        rust_service_dir = parent
+        break
+\end{lstlisting}
+
+Sobald ein Ordner mit \texttt{input\_config.json} gefunden wird, wird dieser als
+Arbeitsverzeichnis für den Rust-Prozess verwendet. Dadurch kann die Binary aus
+dem Build-Verzeichnis gestartet werden, während die Konfigurationsdatei im
+eigentlichen \texttt{rust\_service}-Ordner verbleibt.
+
+\subsubsection{Start der Rust-Binary}
+\label{subsubsec:runner_start}
+
+Vor dem Start der Simulation wird eine eventuell vorhandene alte
+\texttt{ir\_output.json} gelöscht:
+
+\begin{lstlisting}[language=Python]
+output_file = (
+    rust_service_dir / "ir_output.json"
+)
+
+if output_file.exists():
+    output_file.unlink()
+\end{lstlisting}
+
+Dieser Schritt verhindert, dass nach einem fehlgeschlagenen Rust-Lauf
+versehentlich eine alte Ergebnisdatei eingelesen wird. Ohne diese Löschung
+könnte eine veraltete Datei den Eindruck erwecken, dass die aktuelle Simulation
+erfolgreich neue Daten erzeugt hat.
+
+Die eigentliche Ausführung der Rust-Binary erfolgt anschließend über
+\texttt{subprocess.run}:
+
+\begin{lstlisting}[language=Python]
+result = subprocess.run(
+    [str(rust_binary)],
+    cwd=rust_service_dir,
+    capture_output=True,
+    text=True
+)
+\end{lstlisting}
+
+Der Parameter \texttt{cwd} legt das Arbeitsverzeichnis des Prozesses fest. In
+diesem Fall wird der zuvor ermittelte \texttt{rust\_service}-Ordner verwendet,
+damit Rust die Datei \texttt{input\_config.json} findet und die Datei
+\texttt{ir\_output.json} an der erwarteten Stelle erzeugt.
+
+Mit \texttt{capture\_output=True} werden die Ausgaben des Rust-Prozesses
+gesammelt. Dadurch können \texttt{stdout} und \texttt{stderr} im Fehlerfall in
+die Fehlermeldung übernommen werden. Der Parameter \texttt{text=True} sorgt
+dafür, dass diese Ausgaben als Text und nicht als Byte-Daten verarbeitet werden.
+
+\subsubsection{Fehlerbehandlung und JSON-Ingestion}
+\label{subsubsec:runner_error}
+
+Nach dem Prozessstart wird zunächst der Rückgabecode der Rust-Binary geprüft.
+Ein Rückgabecode ungleich null zeigt an, dass der Rust-Prozess fehlgeschlagen
+ist:
+
+\begin{lstlisting}[language=Python]
+if result.returncode != 0:
+    raise RuntimeError(
+        "Rust-Binary ist fehlgeschlagen.\n"
+        f"Returncode: {result.returncode}\n\n"
+        f"STDOUT:\n{result.stdout}\n\n"
+        f"STDERR:\n{result.stderr}"
+    )
+\end{lstlisting}
+
+Die Fehlermeldung enthält neben dem Returncode auch die Standardausgabe und die
+Fehlerausgabe des Rust-Prozesses. Das ist besonders wichtig, da die Ursache
+eines Fehlers häufig nicht in Python, sondern in der extern gestarteten
+Rust-Binary liegt.
+
+Anschließend wird geprüft, ob die erwartete Datei \texttt{ir\_output.json}
+tatsächlich erzeugt wurde:
+
+\begin{lstlisting}[language=Python]
+if not output_file.exists():
+    raise FileNotFoundError(
+        "Rust wurde ausgefuehrt, aber "
+        "ir_output.json wurde nicht gefunden: "
+        f"{output_file}"
+    )
+\end{lstlisting}
+
+Diese Prüfung deckt den Fall ab, dass der Rust-Prozess zwar ohne Fehlercode
+beendet wurde, aber trotzdem keine Ausgabedatei erzeugt hat.
+
+Nach erfolgreicher Ausführung wird die JSON-Datei geöffnet und mit
+\texttt{json.load} in ein Python-Dictionary umgewandelt:
+
+\begin{lstlisting}[language=Python]
+try:
+    with output_file.open(
+        "r",
+        encoding="utf-8"
+    ) as file:
+        ir_data = json.load(file)
+
+except json.JSONDecodeError as error:
+    raise ValueError(
+        "ir_output.json ist keine "
+        "gueltige JSON-Datei: "
+        f"{output_file}"
+    ) from error
+
+return ir_data
+\end{lstlisting}
+
+Falls die Datei beschädigt ist oder kein gültiges JSON enthält, wird der
+\texttt{JSONDecodeError} abgefangen und in eine verständlichere Fehlermeldung
+umgewandelt. Dadurch wird verhindert, dass fehlerhafte Ergebnisdaten unbemerkt
+an die weiteren Verarbeitungsschritte weitergegeben werden.
+
+\subsubsection{Manueller Ende-zu-Ende-Test}
+\label{subsubsec:runner_test}
+
+Zur Überprüfung der Schnittstelle wurde die Datei
+\texttt{test\_rust\_runner\_manual.py} erstellt. Dieser Test startet die
+Rust-Binary über die Runner-Funktion und prüft anschließend, ob die erzeugte
+JSON-Struktur korrekt geladen wurde.
+
+\begin{lstlisting}[language=Python]
+from rust_runner import (
+    run_rust_and_load_json
+)
+
+def main():
+    print("Testing Rust runner...")
+
+    rust_binary = (
+        "../rust_service/target/release/"
+        "rust_service.exe"
+    )
+
+    json_output = "ir_output.json"
+
+    ir_data = run_rust_and_load_json(
+        rust_binary,
+        json_output
+    )
+
+    print(type(ir_data))
+    print(ir_data.keys())
+    print(ir_data["metadata"])
+    print(ir_data["hits"].keys())
+
+    delays = (
+        ir_data["hits"]["delays_seconds"]
+    )
+
+    pressures = (
+        ir_data["hits"]["pressures"]
+    )
+
+    print(len(delays))
+    print(len(pressures))
+\end{lstlisting}
+
+Der manuelle Test bestätigt, dass die Rust-Binary erfolgreich gestartet, die
+erzeugte JSON-Datei eingelesen und die erwartete Grundstruktur an den
+Faltungskern übergeben wird. Die inhaltliche Validierung der Trefferlisten
+erfolgt anschließend an der Systemgrenze der Impulsantwortkonstruktion.
+
+\subsubsection{Bewertung der Prozesskopplung}
+\label{subsubsec:runner_evaluation}
+
+Die Kommunikation zwischen Python und Rust erfolgt bewusst über die Datei
+\texttt{ir\_output.json}. Diese Lösung ist nachvollziehbar, modular und benötigt
+keine direkten Rust-Python-Bindings wie beispielsweise \texttt{PyO3}. Dadurch
+bleiben beide Projektteile unabhängig voneinander ausführbar und können getrennt
+getestet werden.
+
+Die implementierte Fehlerbehandlung sorgt dafür, dass fehlende Dateien, falsche
+Pfade, fehlgeschlagene Rust-Prozesse und ungültige JSON-Ausgaben früh erkannt
+werden. Eine Einschränkung der Architektur besteht darin, dass die Kommunikation
+über eine Datei zusätzlichen Datei-I/O verursacht. Bei sehr großen Simulationen
+kann das Schreiben und anschließende Einlesen der JSON-Datei einen relevanten
+Anteil der Gesamtlaufzeit ausmachen. Eine mögliche spätere Optimierung wäre die
+Datenübertragung über Streams oder eine direkte Rust-Python-Bindung. Für die
+aktuelle Projektstruktur wurde die JSON-basierte Schnittstelle jedoch bewusst
+gewählt, da sie transparent, robust und einfach testbar ist.
+
 %----------------------------------------------------------------------
 \subsection{Von den Strahl-Treffern zur diskreten Impulsantwort}
 \label{subsec:build-ir}
