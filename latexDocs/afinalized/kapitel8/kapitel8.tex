@@ -10,12 +10,12 @@
 
 \paragraph{Digitale Signalverarbeitung (Python-DSP-Pipeline)}
 Die eigentliche Signalverarbeitung erwies sich als der algorithmisch unkritischste Teil der Pipeline; die zentrale Herausforderung war organisatorischer Natur.
-So existierten zwischenzeitlich zwei unabhängig entstandene Verfahren für die räumliche Wiedergabe: ein einfaches Azimut-Panning in sowie eine vollständige HRTF-Faltung über SOFA-Datensätze.
+So existierten zwischenzeitlich zwei unabhängig entstandene Verfahren für die räumliche Wiedergabe: ein einfaches Azimut-Panning in \texttt{convolution.py} sowie eine vollständige HRTF-Faltung über SOFA-Datensätze in \texttt{binaural\_convolver.py}.
 Die spätere Konsolidierung verdeutlichte, dass paralleles Arbeiten an derselben Schnittstelle ohne frühe Absprache zu Doppelentwicklungen führt.
 Eine weitere Lehre betraf die Kalibrierung der Simulationsparameter.
 Ein überdimensionierter virtueller Mikrofonradius von $3\,\text{m}$ in einem Raum generierte riesige JSON-Datenmengen ($>1\,\text{GB}$).
 Ein physikalisch plausibler Radius ($0{,}5\,\text{m}$) verringerte die I/O-Last drastisch.
-Eine numerisch \"funktionierende\" Simulation ist ohne realistische Standardparameter oftmals unbrauchbar.
+Eine numerisch \quotedblbase funktionierende\textquotedblleft{} Simulation ist ohne realistische Standardparameter oftmals unbrauchbar.
 
 \paragraph{Cluster-Infrastruktur und Parallelisierung}
 Die gewählte Lösung -- statische IP-Adressierung und eine manuell erstellte SSH-Liste -- war für die gegebene Größenordnung pragmatisch, stellt jedoch keinen hochgradig skalierbaren Ansatz dar. Ein erheblicher Zeitaufwand floss in nicht-dokumentierte Zugangsdaten-Resets und SSH-Fehlkonfigurationen. Dies zeigt eine Grenze der klassischen Erfolgsmessung über reine Codezeilen auf: Ein wesentlicher Teil des Gesamtaufwands bestand aus Infrastrukturarbeit, die für das Funktionieren der verteilten Ausführung unabdingbar war.
