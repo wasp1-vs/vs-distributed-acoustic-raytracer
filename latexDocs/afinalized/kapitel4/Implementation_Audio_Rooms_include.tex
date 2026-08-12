@@ -4,7 +4,7 @@
 \subsection{Themenschwerpunkt: Audio I/O und 3D-Raumdaten}
 % ========================================
 
-Dieses Dokument beschreibt die Implementierung zweier kritischer Komponenten des Distributed Acoustic Ray Tracers:
+Dieser Abschnitt beschreibt die Implementierung zweier kritischer Komponenten des Distributed Acoustic Ray Tracers:
 
 \begin{enumerate}
     \item \textbf{Audio I/O (Ticket 3):} Einlesen trockener WAV-Dateien und Export des verarbeiteten, halligen Audio-Signals mit Clipping-Pr\"avention
@@ -298,7 +298,7 @@ Der Rust-Tracer liest Dreiecke inkl.\ Material-Absorption aus dieser Datei:
 }
 \end{lstlisting}
 
-Die \texttt{absorption}-Werte entsprechen dem arithmetischen Mittel aller 8 Oktavb\"ander
+Die \texttt{absorption}-Werte entsprechen dem arithmetischen Mittel aller 6 Oktavb\"ander
 aus \texttt{materials.json}. Die frequenzabh\"angige Verarbeitung findet ausschlie\ss{}lich
 in der Python-Convolution statt.
 
@@ -371,7 +371,7 @@ Das Wandmaterial wird in \texttt{rust\_service/input\_config.json} festgelegt:
 
 Vom Rust-Tracer wird \texttt{wall\_material} in \texttt{ir\_output.json} exportiert
 und von der Python-Pipeline automatisch f\"ur die Convolution \"ubernommen.
-Vegerf\"ugbare Materialien (aus \texttt{materials.json}):
+Verf\"ugbare Materialien (aus \texttt{materials.json}):
 
 \begin{table}[H]
     \centering
@@ -602,7 +602,7 @@ Bei Teppich ($\alpha = 0.425$) bricht er bereits nach 11 Bounces ab.
 
 Die mathematischen Details der Impulsantwort-Konstruktion (\texttt{build\_impulse\_response}),
 die Wahl des Faltungsalgorithmus (\texttt{oaconvolve}) sowie die vollst\"andige
-Oktavband-Filterbank sind in Kapitel~5 (Signalverarbeitung, Cem Acar) dokumentiert.
+Oktavband-Filterbank sind in Kapitel~7 (Signalverarbeitung, Cem Acar) dokumentiert.
 Der vorliegende Abschnitt beschr\"ankt sich auf die Schnittstellenperspektive:
 Was \texttt{convolve()} als Vertrag anbietet und wie es in die Gesamtpipeline
 eingebunden ist.
