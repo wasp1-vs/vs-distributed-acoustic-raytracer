@@ -1,60 +1,86 @@
-use glam::Vec2;
+use glam::Vec3;
 
 pub struct Ray {
-    pub origin: Vec2,     // O
-    pub direction: Vec2   // D
+    pub origin: Vec3,
+    pub direction: Vec3,
 }
 
-pub struct Wall {
-    pub start: Vec2, // A
-    pub end: Vec2,   // B
+pub struct Triangle {
+    pub v0: Vec3,
+    pub v1: Vec3,
+    pub v2: Vec3,
     pub absorption: f32,
 }
 
-pub fn check_intersection(ray: &Ray, wall: &Wall) -> Option<Ray> {
-    let from_ray_to_wall_start = wall.start - ray.origin; //Vec2::new(wall.start.x - ray.origin.x, wall.start.y - ray.origin.y); // E
-    let wall_vec = wall.end - wall.start;//Vec2::new(wall.end.x - wall.start.x, wall.end.y - wall.start.y); // V
 
-    let det = ray.direction.perp_dot(wall_vec);
-    if det.abs() < 1e-6 {
+// Möller-Trumbore ray-triangle intersection.
+// Returns the reflected ray at the hit point, or None if no intersection.
+pub fn check_intersection(ray: &Ray, triangle: &Triangle) -> Option<Ray> {
+    let epsilon = 1e-6;
+    let edge1 = triangle.v1 - triangle.v0;
+    let edge2 = triangle.v2 - triangle.v0;
+    let h = ray.direction.cross(edge2);
+    let a = edge1.dot(h);
+
+    // Ray is parallel to the triangle surface
+    if a.abs() < epsilon {
         return None;
     }
-    let ray_t = (from_ray_to_wall_start.perp_dot(wall_vec))/det;        // how far the ray travels
-    let wall_u = (from_ray_to_wall_start.perp_dot(ray.direction))/det;  // where on the wall it hits
 
-    // PREVIOUSLY 0.0 change this to see the difference for PR
-     if ray_t < 0.001 {
-        return None;
-    } else if wall_u < 0.0 || wall_u > 1.0 {
+    let f = 1.0 / a;
+    let s = ray.origin - triangle.v0;
+
+    // Barycentric coordinate u – must be in [0, 1]
+    let u = f * s.dot(h);
+    if u < 0.0 || u > 1.0 {
         return None;
     }
-    let hit_point = ray.origin + (ray_t * ray.direction);
-    let wall_normal = Vec2::new(-wall_vec.y, wall_vec.x).normalize();
-    let bounced_ray = ray.direction.reflect(wall_normal);
 
+    let q = s.cross(edge1);
+
+    // Barycentric coordinate v – u + v must be ≤ 1
+    let v = f * ray.direction.dot(q);
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+
+    let t = f * edge2.dot(q);
+
+    // Reject hits behind the ray or too close (avoids self-intersection)
+    if t < 0.001 {
+        return None;
+    }
+
+    let hit_point = ray.origin + ray.direction * t;
+    let normal = edge1.cross(edge2).normalize();
+    let bounced_direction = ray.direction.reflect(normal).normalize();
 
     Some(Ray {
         origin: hit_point,
-        direction: bounced_ray,
+        direction: bounced_direction,
     })
 }
 
+
+// Returns true if the ray segment (start → end) passes within mic_radius of mic_center.
+// The mic is modeled as a sphere; only the finite segment is tested, not the infinite ray.
 pub fn check_mic_intersection(
-    start: Vec2,
-    end: Vec2,
-    mic_center: Vec2,
-    mic_radius: f32
+    start: Vec3,
+    end: Vec3,
+    mic_center: Vec3,
+    mic_radius: f32,
 ) -> bool {
     let segment = end - start;
     let segment_length_sq = segment.length_squared();
 
-    if segment_length_sq == 0.0 {       // if ray didnt move at all
+    if segment_length_sq == 0.0 {
         return start.distance(mic_center) <= mic_radius;
     }
-    let to_mic = mic_center - start;                     // Vector pointing from start of the ray to the microphone
-    let t = to_mic.dot(segment) / segment_length_sq;      // Vector Projection
-    let clamped_t = t.clamp(0.0, 1.0);          // Only the segment not the inf line
-    let closest_point = start + (segment * clamped_t);  // Coordinates of the closes point on the segment
-    closest_point.distance(mic_center) <= mic_radius          // Is the closes point inside the circle?
 
+    let to_mic = mic_center - start;
+    let t = to_mic.dot(segment) / segment_length_sq;
+
+    // Clamp to the actual segment, not the infinite line
+    let closest_point = start + segment * t.clamp(0.0, 1.0);
+    closest_point.distance(mic_center) <= mic_radius
 }
