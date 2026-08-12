@@ -1,4 +1,31 @@
+% =====================================================================
+% Kapitel 5 - Signalverarbeitung: Faltungskern und frequenzabhaengige
+%             Materialdaempfung (Python)
+% Autor: Cem Acar
+%
+% EINBINDEN ins Hauptdokument:
+%   1. Dieses File nach latexDocs/ legen (Abbildungen unter latexDocs/figures/).
+%   2. Im Master (Dokumentation.tex) an der richtigen Stelle einfuegen:
+%        \input{Kapitel5_DSP_Cem}
+%   3. Der Master braucht diese Pakete:
+%        \usepackage{amsmath}
+%        \usepackage{listings}
+%        \usepackage{graphicx}
+%        \usepackage{booktabs}
+%      Kein xcolor/babel noetig: Umlaute laufen unter UTF-8, deutsche
+%      Anfuehrungszeichen sind literal als Unicode-Zeichen gesetzt
+%      (oeffnend „ U+201E, schliessend “ U+201C).
+%
+% STANDALONE-VORSCHAU (zum alleine Kompilieren einfach drumherum setzen):
+%   \documentclass{article}
+%   \usepackage{amsmath}\usepackage{listings}
+%   \usepackage{graphicx}\usepackage{booktabs}
+%   \begin{document}
+%   \input{Kapitel5_DSP_Cem}
+%   \end{document}
+% =====================================================================
 
+% Listing-Stil fuer dieses Kapitel (nur listings-Kern, keine Farben noetig)
 \lstdefinestyle{cemdsp}{
     language=Python,
     basicstyle=\ttfamily\small,
@@ -10,7 +37,7 @@
     tabsize=4
 }
 
-
+%======================================================================
 \section{Signalverarbeitung: Faltungskern und frequenzabhängige Materialdämpfung}
 \label{sec:python-dsp}
 
@@ -21,10 +48,9 @@ Der in dieser Arbeit entwickelte Raumhall-Dienst trennt die physikalische
 Simulation strikt von der Signalverarbeitung. Die Rust-Engine verfolgt
 Schallstrahlen durch die Raumgeometrie und liefert als Ergebnis eine endliche
 Menge von Strahl-Treffern. Aus diesen erzeugt der Python-Dienst den hörbaren
-Nachhall.
-Dieser Abschnitt fokussiert sich auf die drei zentralen Verarbeitungsschritte zwischen den Rohdaten der Engine und dem fertigen Audiosignal.
-
-Zuerst wird aus den Strahl-Treffern die diskrete Impulsantwort (IR)
+Nachhall. Der hier dokumentierte Eigenanteil umfasst genau die drei
+Verarbeitungsschritte zwischen den Rohdaten der Engine und dem fertigen
+Audiosignal. Zuerst wird aus den Strahl-Treffern die diskrete Impulsantwort (IR)
 konstruiert (\texttt{build\_impulse\_response},
 Abschnitt~\ref{subsec:build-ir}). Diese wird anschließend mit dem trockenen
 Eingangssignal gefaltet (\texttt{convolve}, Abschnitt~\ref{subsec:faltung}).
@@ -33,19 +59,25 @@ Hall seinen materialtypischen Klang (\texttt{apply\_material\_absorption},
 Abschnitt~\ref{subsec:material}). Alle drei Funktionen liegen im Modul
 \texttt{convolution.py} des Python-Dienstes.
 
-
-Die angrenzenden Schnittstellen dieser Pipeline umfassen die Prozessbrücke zur Rust-Engine samt JSON-Ingestion \texttt{rust\_runner.py}
-sowie das Einlesen, Normalisieren und Schreiben der WAV-Dateien \texttt{wav\_handler.py}.
- Innerhalb dieses Rahmens hat der Faltungskern einen klar
-umrissenen Vertrag. Er erhält von der \texttt{rust\_runner.py} Schicht das geparste
-Engine-Ergebnis als Python-Dictionary und von der (\texttt{wav\_handler.py}) Schicht das Trockensignal
+Die Nachbarschaft in der Pipeline ist an anderer Stelle dokumentiert und wird
+hier nur zur Einordnung genannt. Die Orchestrierung der Gesamtpipeline in
+\texttt{main.py} beschreibt Mier. Die Prozessbrücke zur Rust-Engine samt
+JSON-Ingestion (\texttt{rust\_runner.py}) beschreibt Jian, und das Lesen,
+Normalisieren und Schreiben der WAV-Dateien (\texttt{wav\_handler.py})
+beschreibt Kais. Innerhalb dieses Rahmens hat der Faltungskern einen klar
+umrissenen Vertrag. Er erhält von Jians Schicht das geparste
+Engine-Ergebnis als Python-Dictionary und von Kais' Schicht das Trockensignal
 samt Abtastrate. Zurück liefert er das verhallte Signal roh und
 unnormalisiert. Die Pegelbehandlung übernimmt erst der Export.
 
-
-Aufbauend auf den zuvor definierten signaltheoretischen und raumakustischen Prinzipien setzt dieses Kapitel dort an,
-wo die skalare Modellierung der Wandabsorption der Rust-Engine endet.
- Es behandelt die signalverarbeitungsseitige,
+Auch thematisch ist das Kapitel abgegrenzt. Die signaltheoretischen Grundlagen
+sind in Abschnitt~2.3 hergeleitet und werden hier vorausgesetzt: der Begriff der
+Impulsantwort, das Faltungsintegral, dessen zeitdiskrete Form und die schnelle
+Faltung über die diskrete Fourier-Transformation. Die physikalische
+Raumakustik behandelt Abschnitt~2.1. Dort ist insbesondere beschrieben, wie die
+Rust-Engine die Absorption an einer Wand als skalare Reduktion des Restdrucks
+pro Treffer modelliert. Das vorliegende Kapitel setzt an der Stelle an, an der
+diese skalare Sicht endet. Es behandelt die signalverarbeitungsseitige,
 frequenzbandweise Umsetzung der Materialdämpfung im Python-Dienst. Im Kern geht
 es um die Frage, wie aus einem pauschalen Druckwert pro Treffer wieder ein
 Nachhall wird, dessen Klangfarbe vom Material abhängt.
@@ -61,310 +93,6 @@ Oktavband-Filterbank und verifiziert das Verhalten an zwei akustisch
 gegensätzlichen Materialien. Abschnitt~\ref{subsec:dsp-zusammenfassung} fasst
 die Ergebnisse zusammen.
 
-
-\subsection{Prozessbrücke zwischen Rust und Python}
-\label{subsec:rust_runner}
-
-Die Rust-Physik-Engine bildet den rechenintensiven Kern der Simulation. Um ihre
-Ergebnisse an die nachgelagerte Python-Pipeline zu übergeben, wurde eine
-Schnittstelle implementiert, die die kompilierte Rust-Binary aus Python heraus
-startet und anschließend die erzeugte Datei \texttt{ir\_output.json} einliest.
-
-Die Schnittstelle befindet sich in der Datei
-\texttt{python\_service/rust\_runner.py}. Ihre zentrale Funktion ist
-\texttt{run\_rust\_and\_load\_json}. Sie übernimmt die Orchestrierung zwischen
-Python und Rust: Python startet den Rust-Prozess, wartet auf dessen Abschluss,
-prüft die erzeugte Ausgabedatei und stellt die geladenen Daten anschließend als
-Python-Dictionary bereit.
-
-\[
-    \text{Python-Pipeline}
-    \rightarrow
-    \texttt{rust\_runner.py}
-    \rightarrow
-    \text{Rust-Binary}
-    \rightarrow
-    \texttt{ir\_output.json}
-    \rightarrow
-    \text{Python-Dictionary}
-\]
-
-\subsubsection{Aufgabe der Schnittstelle}
-\label{subsubsec:runner_aufgabe}
-
-Die Funktion \texttt{run\_rust\_and\_load\_json} erhält zwei Parameter: den
-Pfad zur kompilierten Rust-Binary und den erwarteten Namen der
-JSON-Ausgabedatei. Beide Werte werden zunächst in \texttt{Path}-Objekte
-umgewandelt, damit Pfade plattformunabhängig und zuverlässig verarbeitet werden
-können.
-
-\begin{lstlisting}[language=Python]
-def run_rust_and_load_json(
-    rust_binary_path: str,
-    json_path: str
-) -> dict:
-    rust_binary = Path(
-        rust_binary_path
-    ).resolve()
-
-    json_file = Path(json_path)
-\end{lstlisting}
-
-Der Rückgabetyp der Funktion ist ein \texttt{dict}. Dadurch stehen die von Rust
-erzeugten Daten nach erfolgreicher Ausführung direkt als Python-Dictionary zur
-Verfügung. Spätere Pipeline-Schritte müssen die JSON-Datei daher nicht erneut
-selbst öffnen und parsen.
-
-Die Schnittstelle erfüllt drei zentrale Aufgaben:
-
-\begin{itemize}
-    \item Start der Rust-Binary als externer Prozess,
-    \item Prüfung und Validierung der Ausführung,
-    \item Einlesen der erzeugten Datei \texttt{ir\_output.json}.
-\end{itemize}
-
-\subsubsection{Pfadprüfung und Arbeitsverzeichnis}
-\label{subsubsec:runner_path}
-
-Vor dem Start der Rust-Binary wird geprüft, ob der übergebene Pfad existiert und
-ob es sich tatsächlich um eine Datei handelt. Dadurch werden ungültige
-Pfadkonfigurationen bereits vor dem Start des Subprozesses abgefangen.
-
-\begin{lstlisting}[language=Python]
-if not rust_binary.exists():
-    raise FileNotFoundError(
-        "Rust-Binary nicht gefunden: "
-        f"{rust_binary}"
-    )
-
-if not rust_binary.is_file():
-    raise FileNotFoundError(
-        "Pfad ist keine Datei: "
-        f"{rust_binary}"
-    )
-\end{lstlisting}
-
-Diese Prüfung verbessert die Robustheit der Schnittstelle. Ein falscher Pfad
-führt dadurch nicht zu einem schwer nachvollziehbaren Fehler innerhalb von
-\texttt{subprocess.run}, sondern zu einer klaren und verständlichen
-Fehlermeldung.
-
-Zusätzlich wird geprüft, ob als erwartete Ausgabedatei tatsächlich
-\texttt{ir\_output.json} übergeben wurde:
-
-\begin{lstlisting}[language=Python]
-if json_file.name != "ir_output.json":
-    raise ValueError(
-        "Rust exportiert aktuell fest nach "
-        "'ir_output.json'. "
-        "Uebergeben wurde aber: "
-        f"{json_file.name}"
-    )
-\end{lstlisting}
-
-Diese Prüfung ist notwendig, weil die Rust-Seite aktuell fest in eine Datei mit
-dem Namen \texttt{ir\_output.json} exportiert. Würde Python eine andere Datei
-erwarten, würde die Schnittstelle nach der Ausführung an der falschen Stelle
-suchen. Die Prüfung verhindert damit eine inkonsistente Annahme zwischen Rust
-und Python.
-
-Ein weiterer wichtiger Punkt ist das Arbeitsverzeichnis. Die Rust-Simulation
-benötigt die Datei \texttt{input\_config.json}. Da sich die kompilierte Binary
-typischerweise in einem Unterordner wie \texttt{target/release} befindet, wird
-der passende Projektordner automatisch gesucht:
-
-\begin{lstlisting}[language=Python]
-rust_service_dir = rust_binary.parent
-
-for parent in rust_binary.parents:
-    config_file = (
-        parent / "input_config.json"
-    )
-
-    if config_file.exists():
-        rust_service_dir = parent
-        break
-\end{lstlisting}
-
-Sobald ein Ordner mit \texttt{input\_config.json} gefunden wird, wird dieser als
-Arbeitsverzeichnis für den Rust-Prozess verwendet. Dadurch kann die Binary aus
-dem Build-Verzeichnis gestartet werden, während die Konfigurationsdatei im
-eigentlichen \texttt{rust\_service}-Ordner verbleibt.
-
-\subsubsection{Start der Rust-Binary}
-\label{subsubsec:runner_start}
-
-Vor dem Start der Simulation wird eine eventuell vorhandene alte
-\texttt{ir\_output.json} gelöscht:
-
-\begin{lstlisting}[language=Python]
-output_file = (
-    rust_service_dir / "ir_output.json"
-)
-
-if output_file.exists():
-    output_file.unlink()
-\end{lstlisting}
-
-Dieser Schritt verhindert, dass nach einem fehlgeschlagenen Rust-Lauf
-versehentlich eine alte Ergebnisdatei eingelesen wird. Ohne diese Löschung
-könnte eine veraltete Datei den Eindruck erwecken, dass die aktuelle Simulation
-erfolgreich neue Daten erzeugt hat.
-
-Die eigentliche Ausführung der Rust-Binary erfolgt anschließend über
-\texttt{subprocess.run}:
-
-\begin{lstlisting}[language=Python]
-result = subprocess.run(
-    [str(rust_binary)],
-    cwd=rust_service_dir,
-    capture_output=True,
-    text=True
-)
-\end{lstlisting}
-
-Der Parameter \texttt{cwd} legt das Arbeitsverzeichnis des Prozesses fest. In
-diesem Fall wird der zuvor ermittelte \texttt{rust\_service}-Ordner verwendet,
-damit Rust die Datei \texttt{input\_config.json} findet und die Datei
-\texttt{ir\_output.json} an der erwarteten Stelle erzeugt.
-
-Mit \texttt{capture\_output=True} werden die Ausgaben des Rust-Prozesses
-gesammelt. Dadurch können \texttt{stdout} und \texttt{stderr} im Fehlerfall in
-die Fehlermeldung übernommen werden. Der Parameter \texttt{text=True} sorgt
-dafür, dass diese Ausgaben als Text und nicht als Byte-Daten verarbeitet werden.
-
-\subsubsection{Fehlerbehandlung und JSON-Ingestion}
-\label{subsubsec:runner_error}
-
-Nach dem Prozessstart wird zunächst der Rückgabecode der Rust-Binary geprüft.
-Ein Rückgabecode ungleich null zeigt an, dass der Rust-Prozess fehlgeschlagen
-ist:
-
-\begin{lstlisting}[language=Python]
-if result.returncode != 0:
-    raise RuntimeError(
-        "Rust-Binary ist fehlgeschlagen.\n"
-        f"Returncode: {result.returncode}\n\n"
-        f"STDOUT:\n{result.stdout}\n\n"
-        f"STDERR:\n{result.stderr}"
-    )
-\end{lstlisting}
-
-Die Fehlermeldung enthält neben dem Returncode auch die Standardausgabe und die
-Fehlerausgabe des Rust-Prozesses. Das ist besonders wichtig, da die Ursache
-eines Fehlers häufig nicht in Python, sondern in der extern gestarteten
-Rust-Binary liegt.
-
-Anschließend wird geprüft, ob die erwartete Datei \texttt{ir\_output.json}
-tatsächlich erzeugt wurde:
-
-\begin{lstlisting}[language=Python]
-if not output_file.exists():
-    raise FileNotFoundError(
-        "Rust wurde ausgefuehrt, aber "
-        "ir_output.json wurde nicht gefunden: "
-        f"{output_file}"
-    )
-\end{lstlisting}
-
-Diese Prüfung deckt den Fall ab, dass der Rust-Prozess zwar ohne Fehlercode
-beendet wurde, aber trotzdem keine Ausgabedatei erzeugt hat.
-
-Nach erfolgreicher Ausführung wird die JSON-Datei geöffnet und mit
-\texttt{json.load} in ein Python-Dictionary umgewandelt:
-
-\begin{lstlisting}[language=Python]
-try:
-    with output_file.open(
-        "r",
-        encoding="utf-8"
-    ) as file:
-        ir_data = json.load(file)
-
-except json.JSONDecodeError as error:
-    raise ValueError(
-        "ir_output.json ist keine "
-        "gueltige JSON-Datei: "
-        f"{output_file}"
-    ) from error
-
-return ir_data
-\end{lstlisting}
-
-Falls die Datei beschädigt ist oder kein gültiges JSON enthält, wird der
-\texttt{JSONDecodeError} abgefangen und in eine verständlichere Fehlermeldung
-umgewandelt. Dadurch wird verhindert, dass fehlerhafte Ergebnisdaten unbemerkt
-an die weiteren Verarbeitungsschritte weitergegeben werden.
-
-\subsubsection{Manueller Ende-zu-Ende-Test}
-\label{subsubsec:runner_test}
-
-Zur Überprüfung der Schnittstelle wurde die Datei
-\texttt{test\_rust\_runner\_manual.py} erstellt. Dieser Test startet die
-Rust-Binary über die Runner-Funktion und prüft anschließend, ob die erzeugte
-JSON-Struktur korrekt geladen wurde.
-
-\begin{lstlisting}[language=Python]
-from rust_runner import (
-    run_rust_and_load_json
-)
-
-def main():
-    print("Testing Rust runner...")
-
-    rust_binary = (
-        "../rust_service/target/release/"
-        "rust_service.exe"
-    )
-
-    json_output = "ir_output.json"
-
-    ir_data = run_rust_and_load_json(
-        rust_binary,
-        json_output
-    )
-
-    print(type(ir_data))
-    print(ir_data.keys())
-    print(ir_data["metadata"])
-    print(ir_data["hits"].keys())
-
-    delays = (
-        ir_data["hits"]["delays_seconds"]
-    )
-
-    pressures = (
-        ir_data["hits"]["pressures"]
-    )
-
-    print(len(delays))
-    print(len(pressures))
-\end{lstlisting}
-
-Der manuelle Test bestätigt, dass die Rust-Binary erfolgreich gestartet, die
-erzeugte JSON-Datei eingelesen und die erwartete Grundstruktur an den
-Faltungskern übergeben wird. Die inhaltliche Validierung der Trefferlisten
-erfolgt anschließend an der Systemgrenze der Impulsantwortkonstruktion.
-
-\subsubsection{Bewertung der Prozesskopplung}
-\label{subsubsec:runner_evaluation}
-
-Die Kommunikation zwischen Python und Rust erfolgt bewusst über die Datei
-\texttt{ir\_output.json}. Diese Lösung ist nachvollziehbar, modular und benötigt
-keine direkten Rust-Python-Bindings wie beispielsweise \texttt{PyO3}. Dadurch
-bleiben beide Projektteile unabhängig voneinander ausführbar und können getrennt
-getestet werden.
-
-Die implementierte Fehlerbehandlung sorgt dafür, dass fehlende Dateien, falsche
-Pfade, fehlgeschlagene Rust-Prozesse und ungültige JSON-Ausgaben früh erkannt
-werden. Eine Einschränkung der Architektur besteht darin, dass die Kommunikation
-über eine Datei zusätzlichen Datei-I/O verursacht. Bei sehr großen Simulationen
-kann das Schreiben und anschließende Einlesen der JSON-Datei einen relevanten
-Anteil der Gesamtlaufzeit ausmachen. Eine mögliche spätere Optimierung wäre die
-Datenübertragung über Streams oder eine direkte Rust-Python-Bindung. Für die
-aktuelle Projektstruktur wurde die JSON-basierte Schnittstelle jedoch bewusst
-gewählt, da sie transparent, robust und einfach testbar ist.
-
 %----------------------------------------------------------------------
 \subsection{Von den Strahl-Treffern zur diskreten Impulsantwort}
 \label{subsec:build-ir}
@@ -378,9 +106,9 @@ der das Empfängervolumen erreicht, hinterlässt zwei Zahlen: die
 Ankunftsverzögerung $\tau_j$ in Sekunden, gemessen ab dem Aussenden des
 Impulses an der Quelle, und den skalaren Restdruck $p_j$, also das, was nach
 allen Wandkontakten und der geometrischen Ausbreitungsdämpfung vom
-Ausgangsdruck übrig ist. Mehr liefert die Engine pro Treffer nicht.
-Über die vorgeschaltete Prozessbrücke werden diese Daten als geparstes JSON-Dictionary an den Faltungskern übergeben:
-
+Ausgangsdruck übrig ist. Mehr liefert die Engine pro Treffer nicht. Über Jians
+Prozessbrücke kommen diese Daten als geparstes JSON-Dictionary beim
+Faltungskern an:
 
 \begin{lstlisting}[style=cemdsp, caption={Erwartetes Schema des Engine-Ergebnisses (Auszug aus dem Docstring von \texttt{convolve}).}, label={lst:schema}]
 ir_data["metadata"]["sample_rate"]: int
@@ -409,9 +137,7 @@ nächstgelegenen Abtastindex:
 \[
     i_j \;=\; \operatorname{round}\!\bigl(\tau_j \cdot f_s\bigr).
 \]
-
-Im Folgenden wird der resultierende Quantisierungsfehler analysiert.
-Bei der Projekt-Abtastrate
+Wie viel Genauigkeit kostet das? Bei der Projekt-Abtastrate
 $f_s = 44{,}1$~kHz ($44100$~Hz; im Fließtext durchgängig als $44{,}1$~kHz
 notiert) liegt zwischen zwei Abtastwerten eine Periode von
 $1/f_s \approx 22{,}68~\mu\mathrm{s}$, und weil symmetrisch gerundet wird,
@@ -429,11 +155,12 @@ eine Wandverkleidung dick ist; die Laufwege, die die Engine liefert, sind
 ohnehin deutlich unschärfer. Auch spektral passiert wenig. Selbst im höchsten
 modellierten Oktavband um $4$~kHz (Periodendauer $250~\mu\mathrm{s}$)
 verschiebt der maximale Rundungsfehler die Phase eines einzelnen Treffers um
-rund $16^\circ$.
-Eine subsample-genaue Platzierung durch bandbegrenzte Interpolation mit gefensterten sinc-Kernen würde die Berechnungskomplexität pro
-Array-Eintrag signifikant erhöhen.
-Für eine Hall-Anwendung, die auf der statistischen Überlagerung tausender Reflexionen basiert, ist dieser Rechenaufwand unverhältnismäßig.
-Die Rundung bleibt, als bewusste und dokumentierte Vereinfachung.
+rund $16^\circ$. Natürlich ließe sich jeder Treffer subsample-genau
+platzieren, etwa über bandbegrenzte Interpolation mit gefensterten
+$\operatorname{sinc}$-Kernen, doch dann würde aus jedem einzelnen Array-Eintrag
+ein Kurzfilter. Diesen Preis zahlt eine Hall-Anwendung nicht, in der sich
+Tausende Reflexionen statistisch überlagern. Die Rundung bleibt, als bewusste
+und dokumentierte Vereinfachung.
 
 Die Länge der Impulsantwort folgt aus dem größten gerundeten Index,
 $M = \max_j i_j + 1$; konfiguriert wird sie nicht, sie steckt in den Daten.
@@ -446,10 +173,9 @@ bis knapp $0{,}45$~s reichen, sind das $M = 19842$ Samples, als
 
 Nach der Rundung ist die Abbildung von Treffern auf Indizes nicht mehr
 injektiv, zwei Strahlen mit ähnlicher Weglänge können im selben Abtastwert
-landen.
-Aufgrund der physikalisch additiven Überlagerung der Druckanteile muss die Diskretisierung akkumulieren statt überschreiben.
-Bei der Standard-Zuweisung in NumPy tritt hierbei jedoch ein Datenverlust auf.
- Die naheliegende Zuweisung
+landen. Ihre Druckanteile überlagern sich physikalisch additiv. Also muss auch
+die Diskretisierung summieren statt überschreiben, und genau an dieser Stelle
+hat NumPy einen bekannten Fallstrick. Die naheliegende Zuweisung
 \texttt{ir[indices] = pressures} überschreibt schlicht, bei doppelten Indizes
 überlebt nur der zuletzt geschriebene Wert. Auch die Inkrement-Form
 \texttt{ir[indices] += pressures} hilft nicht weiter: Sie ist gepuffert, NumPy
@@ -498,9 +224,9 @@ Nachhallschwanz.
     \centering
     \includegraphics[width=0.85\textwidth]{kapitel7/ir_stem}
     \caption{Aus Strahl-Treffern konstruierte Beispiel-Impulsantwort $h[i]$
-        über der Zeit ($0$ bis $0{,}5$~s). Der Direktschall bildet den ersten,
-        stärksten Impuls; danach folgen abklingende Reflexionen. Die Länge der
-        Impulsantwort beträgt $M = 19842$ Samples bei $f_s = 44{,}1$~kHz.}
+    über der Zeit ($0$ bis $0{,}5$~s). Der Direktschall bildet den ersten,
+    stärksten Impuls; danach folgen abklingende Reflexionen. Die Länge der
+    Impulsantwort beträgt $M = 19842$ Samples bei $f_s = 44{,}1$~kHz.}
     \label{fig:ir-stem}
 \end{figure}
 
@@ -508,9 +234,9 @@ Nachhallschwanz.
 \label{subsubsec:validierung}
 
 \texttt{build\_impulse\_response} verarbeitet Daten, die aus einem fremden
-Prozess über eine JSON-Datei eintreffen.
-An dieser Systemgrenze ist eine strikte Eingabevalidierung erforderlich, um unerwartete Folgefehler in der nachgelagerten Verarbeitung zu verhindern.
-Innerhalb des Python-Dienstes wird dafür
+Prozess über eine JSON-Datei eintreffen. Das ist eine Systemgrenze, und an ihr
+gilt: lieber sofort und mit aussagekräftiger Meldung scheitern als
+stillschweigend falsch weiterrechnen. Innerhalb des Python-Dienstes wird dafür
 nicht erneut geprüft, die Fehlerbehandlung konzentriert sich auf den Übergang
 zwischen den Diensten. Sieben Fehlerklassen weist die Funktion explizit
 zurück:
@@ -564,10 +290,10 @@ Ratenquotienten. Der Hall wäre hörbar verstimmt.
 \subsubsection{Anforderungen und Aufwandsabschätzung}
 \label{subsubsec:aufwand}
 
-
-Das verhallte Ausgangssignal ergibt sich aus der zeitdiskreten Faltung des
-Trockensignals $x[n]$ der Länge N mit der diskreten Impulsantwort $h[i]$ der Länge $M$.
-Für die Implementierung zählen vor allem zwei Eigenschaften der Operation,
+Mit der diskreten Impulsantwort $h[i]$ der Länge $M$ und dem Trockensignal
+$x[n]$ der Länge $N$ ist der verhallte Ausgang die zeitdiskrete Faltung aus
+Abschnitt~2.3; die Definition wird hier nicht wiederholt. Für die
+Implementierung zählen vor allem zwei Eigenschaften der Operation,
 Ergebnislänge und Rechenaufwand. Das vollständige Faltungsprodukt umfasst
 $N + M - 1$ Samples, und genau diese Länge gibt der Modus \texttt{mode="full"}
 zurück. Nur so überlebt der Nachhallschwanz, der nach dem Ende des
@@ -576,11 +302,10 @@ würde ihn hörbar kappen. Für ein Sekunden-Signal bei $44{,}1$~kHz und die
 Impulsantwort aus Abbildung~\ref{fig:ir-stem} sind das
 $44100 + 19842 - 1 = 63941$ Samples, rund $1{,}45$~s Audio.
 
-Der Rechenaufwand ist die eigentliche Entwurfsfrage.
-
-Die direkte Auswertung der Faltungssumme erfordert für jeden Ausgabewert bis zu $\min(N,M)$ Multiplikationen und Additionen,
-was einer Gesamtkomplexität von $\mathcal{O}(N \cdot M)$ entspricht.
-Schon der genannte Fall kostet damit
+Der Rechenaufwand ist die eigentliche Entwurfsfrage. Wer die Faltungssumme
+direkt auswertet, zahlt für jeden Ausgabewert bis zu $\min(N, M)$
+Multiplikationen und Additionen, insgesamt $\mathcal{O}(N \cdot M)$
+Operationen; schon der genannte Fall kostet damit
 $44100 \cdot 19842 \approx 8{,}8 \cdot 10^{8}$
 Multiply-Accumulate-Operationen für eine einzige Sekunde Audio, und bei einer
 Impulsantwort von einer Sekunde Länge sind es knapp $2 \cdot 10^{9}$. Die
@@ -631,7 +356,7 @@ logarithmisch auf.
 \begin{table}[htbp]
     \centering
     \caption{Laufzeiten der Faltungsvarianten für ein Trockensignal von
-        $1$~s bei $f_s = 44{,}1$~kHz in Abhängigkeit der IR-Länge $M$.}
+    $1$~s bei $f_s = 44{,}1$~kHz in Abhängigkeit der IR-Länge $M$.}
     \label{tab:benchmark}
     \begin{tabular}{r r r r r r}
         \toprule
@@ -666,8 +391,8 @@ Pipeline gibt die Strahlverfolgung in der Rust-Engine vor.
     \includegraphics[width=0.85\textwidth]{kapitel7/conv_benchmark}
     \caption{Laufzeit der drei Faltungsvarianten (logarithmische
     Millisekunden-Achse) über der IR-Länge. Die direkte Faltung
-        (\texttt{np.convolve}) wächst linear mit $M$, während
-        \texttt{fftconvolve} und \texttt{oaconvolve} nahezu konstant bleiben.}
+    (\texttt{np.convolve}) wächst linear mit $M$, während
+    \texttt{fftconvolve} und \texttt{oaconvolve} nahezu konstant bleiben.}
     \label{fig:conv-benchmark}
 \end{figure}
 
@@ -687,19 +412,19 @@ Laufzeit pro Konfiguration nur einmal. Bei Messwerten im dreistelligen
 Millisekundenbereich reicht das.
 
 Ausgeführt wurden die Messungen mit CPython~3.14.4, NumPy~2.4.4 und
-SciPy~1.17.1.
-Obwohl absolute Ausführungszeiten hardwareabhängig sind, belegt dieser Benchmark das zugrundeliegende Skalierungsverhalten.
-Die Gegenüberstellung von linearem und nahezu konstantem Wachstum validiert die theoretischen Aufwandsklassen plattformunabhängig.
-
+SciPy~1.17.1. Absolutzeiten dieser Art übertragen sich nicht auf andere
+Hardware, darauf kommt es hier aber auch nicht an. Was der Benchmark trägt,
+ist das Skalierungsverhalten, linear gegen nahezu konstant, und dieses
+Verhältnis folgt aus den Aufwandsklassen in
+Abschnitt~\ref{subsubsec:aufwand} auf jeder Maschine gleich.
 
 \subsubsection{Mehrkanalverarbeitung}
 \label{subsubsec:mehrkanal}
 
-
-Das Modul zum Einlesen der Audiodaten liefert Mono-Material als eindimensionales Array und
+Kais' WAV-Leser liefert Mono-Material als eindimensionales Array und
 Stereo- oder Mehrkanalmaterial als zweidimensionales Array der Form
-$(\text{Samples} \times \text{Kanäle})$.
-Die Faltung behandelt beide Fälle explizit:
+$(\text{Samples} \times \text{Kanäle})$. Die Faltung behandelt beide Fälle
+explizit:
 
 \begin{lstlisting}[style=cemdsp, caption={Mono- und Mehrkanal-Faltung in \texttt{convolve}.}, label={lst:mehrkanal}]
 if dry_audio.ndim == 1:
@@ -741,12 +466,10 @@ Zum Vertrag der Funktion gehört ausdrücklich, dass das Ergebnis roh und
 unnormalisiert zurückgegeben wird. Die Faltung summiert die Beiträge vieler
 Reflexionen, ihr Ausgang kann den Wertebereich $[-1, 1]$ deshalb ohne Weiteres
 verlassen. Das Beispiel in Abbildung~\ref{fig:dry-wet} zeigt einen solchen
-Pegelzuwachs.
-Die Entscheidung über eine finale Normalisierung der Pegel wird nicht im Faltungskern,
-sondern im nachgelagerten Export-Modul \texttt{write\_wav} getroffen.
- Diese Trennung hält
-die Verantwortlichkeiten sauber.
-Der Kern berechnet das mathematisch korrekte Faltungsprodukt, die I/O-Schicht sorgt für ein clippingfreies Dateiformat.
+Pegelzuwachs. Die Entscheidung, ob und wie normalisiert wird, trifft nicht der
+Faltungskern, sondern Kais' \texttt{write\_wav} beim Export. Diese Trennung hält
+die Verantwortlichkeiten sauber. Der Kern berechnet das mathematisch korrekte
+Faltungsprodukt, die I/O-Schicht sorgt für ein clippingfreies Dateiformat.
 Würde stattdessen schon in \texttt{convolve} normalisiert, ginge die
 Pegelrelation zwischen verschiedenen Läufen verloren und ein Vergleich
 unterschiedlicher Räume oder Materialien am Ausgangssignal wäre verfälscht.
@@ -801,10 +524,8 @@ klingen zuerst ab. Die Rust-Engine bildet diesen Effekt nicht ab. Wie in
 Abschnitt~2.1 beschrieben, reduziert sie die Absorption an jeder Wand auf einen
 einzigen skalaren Faktor und liefert pro Treffer nur den Restdruck $p_j$. Welche
 Frequenzanteile auf dem Weg verloren gingen, ist an dieser Systemgrenze bereits
-ausgelöscht.
-Eine aus solchen Treffern gebaute Impulsantwort ist zwangsläufig spektral neutral.
-Ohne frequenzabhängige Dämpfung besäße der simulierte Nachhall unabhängig von der Raumausstattung ein spektral neutrales Klangprofil.
-
+ausgelöscht. Eine aus solchen Treffern gebaute Impulsantwort ist zwangsläufig
+spektral neutral. Jeder Raum klänge nach demselben „grauen“ Hall.
 
 Der hier dokumentierte Beitrag setzt deshalb auf der Signalverarbeitungsseite
 an. \texttt{apply\_material\_absorption} formt die bereits konstruierte
@@ -903,14 +624,14 @@ Absorptionskoeffizient ist. Die Exponentialform wird in logarithmischer
 Schreibweise deutlicher:
 \begin{align*}
     g_b(t) &= \exp\!\Bigl(\frac{t}{\tau_{\mathrm{mfp}}}\,
-    \ln\bigl(1 - \alpha_b\bigr)\Bigr),
+        \ln\bigl(1 - \alpha_b\bigr)\Bigr),
 \end{align*}
 eine abklingende Exponentialfunktion mit bandabhängiger Zeitkonstante. Setzt man
 die $-60$-dB-Schwelle der klassischen Nachhallzeit an, also
 $g_b(T_{60,b}) = 10^{-3}$, folgt
 \[
     T_{60,b} \;=\; \tau_{\mathrm{mfp}} \cdot
-    \frac{\ln 10^{-3}}{\ln\bigl(1 - \alpha_b\bigr)}.
+        \frac{\ln 10^{-3}}{\ln\bigl(1 - \alpha_b\bigr)}.
 \]
 Konkrete Zahlen zeigen die Spannweite des Modells. Für Beton bei $2$~kHz
 ($\alpha_b = 0{,}04$) ergibt sich $T_{60} \approx 3{,}4$~s. Für Teppich im selben
@@ -1123,10 +844,10 @@ was der Energie-Selbsttest quantitativ misst.
     \includegraphics[width=0.85\textwidth]{kapitel7/material_spectrum}
     \caption{Geglättetes FFT-Betragsspektrum (relative dB) der
     materialgeformten Impulsantwort für Teppich (\texttt{carpet}) und Beton
-        (\texttt{concrete}), mit markierter $2$-kHz-Linie. Das Teppich-Spektrum
-        fällt oberhalb von etwa $2$~kHz stark ab, das Beton-Spektrum bleibt
-        deutlich flacher; der Energieanteil oberhalb $2$~kHz beträgt $0{,}39$
-        (Teppich) gegenüber $0{,}71$ (Beton).}
+    (\texttt{concrete}), mit markierter $2$-kHz-Linie. Das Teppich-Spektrum
+    fällt oberhalb von etwa $2$~kHz stark ab, das Beton-Spektrum bleibt
+    deutlich flacher; der Energieanteil oberhalb $2$~kHz beträgt $0{,}39$
+    (Teppich) gegenüber $0{,}71$ (Beton).}
     \label{fig:material-spectrum}
 \end{figure}
 
@@ -1198,9 +919,10 @@ $g_b(t) = (1 - \alpha_b)^{t/\tau_{\mathrm{mfp}}}$ und setzt sie wieder zusammen.
 Der Selbsttest belegt das erwartete Verhalten. Nach der Formung verbleibt beim
 Teppich nur ein Energieanteil von $0{,}39$ oberhalb von $2$~kHz, beim Beton
 $0{,}71$. Damit klingt ein Betonraum hell und lang nach, ein Teppichraum kurz und
-dunkel, obwohl beide aus derselben breitbandigen Trefferliste hervorgehen.
-Die dokumentierten Modellgrenzen, insbesondere die Annahme eines globalen Raummaterials, motivieren einen bandweisen Druck-Export $p_{j,b}$ als sinnvolle architektonische Weiterentwicklung.
-
+dunkel, obwohl beide aus derselben breitbandigen Trefferliste hervorgehen. Die
+dokumentierten Modellgrenzen, insbesondere das globale Raummaterial, motivieren
+den in Kapitel~7 skizzierten bandweisen Druck-Export $p_{j,b}$ als natürliche
+Weiterentwicklung.
 
 % =====================================================================
 % Literatur fuers globale Verzeichnis
