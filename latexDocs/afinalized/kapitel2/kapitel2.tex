@@ -48,13 +48,16 @@ Der Schalldruck am Empfänger ist das Integral über alle möglichen Schallpfade
 Die Monte-Carlo-Integration umgeht dieses Problem durch stochastische Stichprobennahme.
 Statt alle Pfade zu berechnen, schätzt man den Erwartungswert eines Integrals durch den arithmetischen Mittelwert von $N$ zufällig gezogenen Stichproben:
 \[\mathbb{E}[f(X)] \approx \frac{1}{N} \sum_{i=1}^{N} f(x_i)\]
-Nach dem Gesetz der großen Zahlen konvergiert dieser Schätzer für $N \to \infty$ gegen den wahren Integralwert. Der statistische Fehler nimmt dabei mit $\frac{1}{\sqrt{N}}$ ab: ein viermal so großes Stichprobenvolumen halbiert den Fehler.
+Nach dem Gesetz der großen Zahlen konvergiert dieser Schätzer für $N \to \infty$ gegen den wahren Integralwert.
+Der statistische Fehler nimmt dabei mit $\frac{1}{\sqrt{N}}$ ab: ein viermal so großes Stichprobenvolumen halbiert den Fehler.
 
 \paragraph{Anwendung: Stochastisches Raytracing}
 
 In der Simulation entspricht eine Stichprobe einem Schallstrahl, der in einer zufälligen Richtung $\theta \in [0, 2\pi)$ vom Emitter ausgesendet wird:
 \[\vec{D} = (\cos\theta,\; \sin\theta), \quad \theta \sim \mathcal{U}(0,\; 2\pi)\]
-Jeder Strahl verfolgt seinen Ausbreitungspfad, reflektiert an Wänden und registriert einen Treffer, sobald er die Mikrofonkapsel schneidet. Der akkumulierte Beitrag dieses Treffers -- Laufzeit $\tau$ und Restdruck $p$ -- repräsentiert eine Stichprobe des akustischen Integrals. Über $N = 10^6$ bis $10^8$ Strahlen konvergiert die Gesamtheit der Treffer zur vollständigen Impulsantwort des Raumes.
+Jeder Strahl verfolgt seinen Ausbreitungspfad, reflektiert an Wänden und registriert einen Treffer, sobald er die Mikrofonkapsel schneidet.
+Der akkumulierte Beitrag dieses Treffers (Laufzeit $\tau$ und Restdruck $p$) repräsentiert eine Stichprobe des akustischen Integrals.
+Über $N = 10^6$ bis $10^8$ Strahlen konvergiert die Gesamtheit der Treffer zur vollständigen Impulsantwort des Raumes.
 Der wesentliche Vorteil gegenüber deterministischen Verfahren liegt in der trivialen Parallelisierbarkeit: Da jeder Strahl unabhängig von allen anderen ist, lassen sich die $N$ Stichproben direkt auf beliebig viele CPU-Kerne aufteilen (siehe Abschnitt~\ref{subsec:amdahl}).
 
 
@@ -63,7 +66,7 @@ Der wesentliche Vorteil gegenüber deterministischen Verfahren liegt in der triv
 
 \paragraph{Die Impulsantwort (IR)}
 
-Ein lineares, zeitinvariantes System -- wie ein Raum aus akustischer Perspektive -- ist vollständig durch seine \emph{Impulsantwort} $h(t)$ charakterisiert: die Ausgabe des Systems bei einem idealen Dirac-Impuls $\delta(t)$ am Eingang.
+Ein lineares, zeitinvariantes System (wie ein Raum aus akustischer Perspektive) ist vollständig durch seine \emph{Impulsantwort} $h(t)$ charakterisiert: die Ausgabe des Systems bei einem idealen Dirac-Impuls $\delta(t)$ am Eingang.
 Die von der Rust-Engine berechnete Menge an (Laufzeit, Druck)-Paaren $\{(\tau_i, p_i)\}_{i=1}^{M}$ stellt eine diskrete Approximation dieser Impulsantwort dar:
 \[h(t) \approx \sum_{i=1}^{M} p_i \cdot \delta(t - \tau_i)\]
 Das Python-Modul diskretisiert diese Darstellung in ein sample-genaues Array, indem jede Verzögerung $\tau_i$ in den Sample-Index $n_i = \lfloor \tau_i \cdot f_s \rceil$ umgerechnet und Druckwerte akkumuliert werden (bei $f_s = 44100\,\text{Hz}$).

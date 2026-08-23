@@ -518,18 +518,15 @@ if current_pressure < config.min_pressure {
 }
 \end{lstlisting}
 
-Der Absorptionswert der getroffenen Fläche bestimmt, wie stark der Strahl nach
-der Reflexion abgeschwächt wird. Sinkt der Druck unter den konfigurierten
-Mindestwert, wird die Simulation dieses Strahls beendet. Dadurch werden sehr
-leise und für das Ergebnis kaum relevante Reflexionen nicht unnötig
-weiterberechnet.
+Der Absorptionswert der getroffenen Fläche bestimmt, wie stark der Strahl nach der Reflexion abgeschwächt wird.
+Sinkt der Druck unter den konfigurierten Mindestwert, wird die Simulation dieses Strahls beendet.
+Dadurch werden sehr leise, und für das Ergebnis kaum relevante Reflexionen, nicht unnötig weiterberechnet.
 
 \subsubsection{Konfiguration der 3D-Simulation}
 \label{subsubsec:3d_config}
 
-Die Parameter der Simulation werden aus der Datei
-\texttt{input\_config.json} geladen. Die zugehörige Struktur
-\texttt{SimulationConfig} enthält unter anderem die maximale Anzahl an
+Die Parameter der Simulation werden aus der Datei \texttt{input\_config.json} geladen.
+Die zugehörige Struktur \texttt{SimulationConfig} enthält, unter anderem, die maximale Anzahl an
 Reflexionen, den minimalen Druckwert, den Mikrofonradius, die Anzahl der
 auszusendenden Strahlen sowie die Positionen von Lautsprecher und Mikrofon:
 
@@ -571,13 +568,12 @@ eines vollständigen 3D-Raums berechnen.
 \subsubsection{Ergebnis der Umstellung}
 \label{subsubsec:3d_result}
 
-Durch die Umstellung auf \texttt{Vec3} und dreiecksbasierte Raumflächen wurde
-die Beschränkung auf eine zweidimensionale Simulation aufgehoben. Die Engine
-kann nun räumliche Strahlengänge erzeugen, den jeweils nächstgelegenen
-Strahl-Dreieck-Schnittpunkt bestimmen und die Strahlen über mehrere Reflexionen
-hinweg verfolgen. Die Segment-Kugel-Prüfung ermöglicht dabei eine robuste
-Erkennung von Mikrofontreffern. Die vorhandene Trennung zwischen Geometrie,
-Simulation, Konfiguration und Export blieb trotz der Erweiterung erhalten.
+Durch die Umstellung auf \texttt{Vec3} und dreiecksbasierte Raumflächen, wurde
+die Beschränkung auf eine zweidimensionale Simulation aufgehoben.
+Die Engine kann somit räumliche Strahlengänge erzeugen, den jeweils nächstgelegenen
+Strahl-Dreieck-Schnittpunkt bestimmen, und die Strahlen über mehrere Reflexionen hinweg verfolgen.
+Die Segment-Kugel-Prüfung ermöglicht dabei eine robuste Erkennung von Mikrofontreffern.
+Jedoch blieb die vorhandene Trennung zwischen Geometrie, Simulation, Konfiguration und Export trotz der Erweiterung erhalten.
 
 \subsection{Hochleistungs-Nebenläufigkeit und Datenparallelität}
 \label{subsec:concurrency}
@@ -665,8 +661,11 @@ ray_colour = f'hsl({(i*137.5)%360},80%,60%)'
 \subsection{Behandlung von Fließkomma-Ungenauigkeiten (Self-Intersection)}
 \label{subsec:epsilon_fix}
 
-Die Auswertung der Strahlengänge durch den Visualizer offenbarte ein kritisches algorithmisches Problem: Strahlen wurden unregelmäßig terminiert. Die Ursache hierfür lag in der Fließkomma-Ungenauigkeit der CPU.
-Wenn ein Strahlengang an einer Wand reflektiert wird, dient dieser mathematische Schnittpunkt als Ursprung für den nachfolgenden Reflexionsstrahl. In der nächsten Iteration prüft die Engine den neuen Strahl gegen alle Wände -- inklusive der Wand, auf der er sich bereits befindet. Aufgrund von Rundungsfehlern berechnet der Algorithmus die Distanz zur aktuellen Wand nicht als $0{,}0$, sondern beispielsweise als $-0{,}0000001$.
+Die Auswertung der Strahlengänge durch den Visualizer offenbarte ein kritisches algorithmisches Problem: Strahlen wurden unregelmäßig terminiert.
+Die Ursache hierfür lag in der Fließkomma-Ungenauigkeit der CPU.
+Wenn ein Strahlengang an einer Wand reflektiert wird, dient dieser mathematische Schnittpunkt als Ursprung für den nachfolgenden Reflexionsstrahl.
+In der nächsten Iteration prüft die Engine den neuen Strahl gegen alle Wände, inklusive der Wand, auf der er sich bereits befindet.
+Aufgrund von Rundungsfehlern berechnet der Algorithmus die Distanz zur aktuellen Wand nicht als $0{,}0$, sondern beispielsweise als $-0{,}0000001$.
 
 \begin{figure}[htbp]
   \centering

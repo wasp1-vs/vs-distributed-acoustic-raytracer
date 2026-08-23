@@ -4,14 +4,14 @@
 \subsection{Themenschwerpunkt: Audio I/O und 3D-Raumdaten}
 % ========================================
 
-Dieser Abschnitt beschreibt die Implementierung zweier kritischer Komponenten des Distributed Acoustic Ray Tracers:
+Dieser Abschnitt beschreibt die Implementierung zweier Komponenten des Multithreaded Acoustic Ray Tracers:
 
 \begin{enumerate}
-    \item \textbf{Audio I/O (Ticket 3):} Einlesen trockener WAV-Dateien und Export des verarbeiteten, halligen Audio-Signals mit Clipping-Pr\"avention
-    \item \textbf{Raumdaten (OBJ-Parser):} Laden von 3D-Modellen aus \texttt{.obj}-Dateien und Konvertierung in das interne JSON-Format
+    \item \textbf{Audio I/O:} Einlesen trockener WAV-Dateien und Export des verarbeiteten, halligen Audio-Signals mit Clipping-Pr\"avention
+    \item \textbf{Raumdaten:} Laden von 3D-Modellen aus \texttt{.obj}-Dateien und Konvertierung in das interne JSON-Format
 \end{enumerate}
 
-Die Implementierung erfolgt in Python und integriert sich nahtlos in die bestehende Pipeline, die Rust-basierte Physik-Engine, DSP-Convolution und Distributed-Computing-Frameworks verbindet.
+Die Implementierung erfolgt in Python und integriert sich nahtlos in die bestehende Pipeline, die Rust-basierte Physik-Engine, DSP-Convolution und Multithreading verbindet.
 
 \subsection{Architektur-\"Ubersicht}
 
@@ -31,7 +31,7 @@ Das Wandmaterial wird in \texttt{input\_config.json} konfiguriert und durchgehen
 \subsection{Audio I/O Handling}
 % ========================================
 
-\subsection{Anforderungen (Akzeptanzkriterien)}
+\subsubsection{Anforderungen (Akzeptanzkriterien)}
 
 \begin{enumerate}
     \item Sauberes Einlesen der \texttt{unprocessed.wav} ohne Qualit\"atsverlust
@@ -43,7 +43,7 @@ Das Wandmaterial wird in \texttt{input\_config.json} konfiguriert und durchgehen
 
 \subsubsection{WAV-Format und Audio-Digitalisierung}
 
-Das WAV-Format speichert Audiodaten als zeitdiskrete Samples mit konstanter Abtastfrequenz $f_s$ (typisch 44.1 kHz oder 48 kHz):
+Das WAV-Format speichert Audiodaten als zeitdiskrete Samples mit konstanter Abtastfrequenz $f_s$:
 
 $$x[n] = \int_{(n-0.5)/f_s}^{(n+0.5)/f_s} x_{\text{analog}}(t) \, dt$$
 
@@ -81,8 +81,8 @@ schreibt standardm\"a\ss{}ig 32-bit-Float zur\"uck, was f\"ur Hall-Anwendungen
 bei $f_s = 44.100$\,Hz ausreicht.
 
 \textbf{Abtastraten-Konsistenz:} Die Rust-Engine ist in \texttt{input\_config.json}
-mit einer festen Abtastrate konfiguriert (Standard: $44.100$\,Hz). Stimmt die
-Abtastrate der Eingangs-WAV nicht \"uberein, gibt die Pipeline eine Warnung aus
+mit einer festen Abtastrate konfiguriert ($44.100$\,Hz).
+Stimmt die Abtastrate der Eingangs-WAV nicht \"uberein, gibt die Pipeline eine Warnung aus
 ohne automatisches Resampling, da eine Rateninkonsistenz alle Verzögerungen
 der Impulsantwort um den Ratenquotienten staucht oder dehnt und den Hall
 hörbar verstimmt.
@@ -102,7 +102,7 @@ Um dies zu vermeiden, normalisieren wir:
 $$y_{\text{norm}}[n] = \frac{y[n]}{A_{\max}} \quad \text{wobei} \quad A_{\max} = \max_n |y[n]|$$
 
 Diese Normalisierung ist bewusst \textbf{konditional}: Liegt das Maximum bereits
-unter 1.0, wird nicht skaliert -- leise Signale werden nicht k\"unstlich lauter.
+unter 1.0, wird nicht skaliert da leise Signale nicht k\"unstlich lauter gemacht werden.
 Die Pegelrelation zwischen verschiedenen Material-L\"aufen bleibt damit
 erhalten, was akustische Vergleiche erm\"oglicht.
 
@@ -177,9 +177,9 @@ Der \texttt{wall\_material}-Wert wird automatisch aus \texttt{ir\_output.json} g
 \subsection{3D-Raumdaten: OBJ-Parser}
 % ========================================
 
-\subsection{Theoretischer Hintergrund}
+\subsubssection{Theoretischer Hintergrund}
 
-\subsubsection{OBJ-Format}
+\subsubsubsection{OBJ-Format}
 
 Das Wavefront \texttt{.obj}-Format ist ein textbasiertes 3D-Modellformat.
 Jede Zeile beginnt mit einem Schl\"usselwort, das den Zeilentyp bestimmt:
@@ -220,7 +220,8 @@ Der Parser verarbeitet nur die f\"ur Raytracing relevanten Zeilen:
     \caption{OBJ-Zeilentypen und Verarbeitungsstatus im Parser}
 \end{table}
 
-\textbf{Indexierung:} OBJ nutzt 1-basierte Indizes, Python 0-basierte -- der Parser subtrahiert beim Einlesen automatisch 1.
+\textbf{Indexierung:} OBJ nutzt 1-basierte Indizes, Python 0-basierte.
+Der Parser subtrahiert beim Einlesen automatisch 1.
 
 \subsubsection{Dreiecks-Repr\"asentation}
 
@@ -331,7 +332,7 @@ exportiert werden. Der empfohlene Workflow:
 \subsection{Integration und Testing}
 % ========================================
 
-\subsection{End-to-End-Pipeline}
+\subsubsection{End-to-End-Pipeline}
 
 Die Pipeline verl\"auft nun in 5 Schritten. Schritt~0 ist vollautomatisch:
 \texttt{room.obj} wird erkannt, mit dem konfigurierten Material in
@@ -359,14 +360,14 @@ write_wav(output_wav_path, wet_audio, sample_rate)
 
 \subsection{Material-Konfiguration}
 
-Das Wandmaterial wird in \texttt{rust\_service/input\_config.json} festgelegt:
+Das Wandmaterial wird in \texttt{rust\_service/materials.json} festgelegt:
 
 \begin{lstlisting}[language={}]
-{
-  "wall_material": "concrete",
-  "max_bounces": 100,
-  "rays_to_cast": 1000
-}
+"materials": {
+    "concrete": {
+      "absorption": [0.02, 0.03, 0.03, 0.03, 0.04, 0.07],
+      "scattering": 0.05
+    },
 \end{lstlisting}
 
 Vom Rust-Tracer wird \texttt{wall\_material} in \texttt{ir\_output.json} exportiert
@@ -379,15 +380,13 @@ Verf\"ugbare Materialien (aus \texttt{materials.json}):
         \hline
         \textbf{Material} & \textbf{Beschreibung} & \textbf{Mittl. Absorption} \\
         \hline
-        \texttt{concrete} & Beton (stark reflektierend) & 0.033 \\
+        \texttt{concrete} & Beton  & 0.033 \\
         \hline
-        \texttt{drywall}  & Trockenbau (m\"a\ss{}ig) & 0.150 \\
+        \texttt{wood}  & Holz & 0.11 \\
         \hline
-        \texttt{glass}    & Glas (stark reflektierend) & 0.026 \\
+        \texttt{glass}    & Glas  & 0.026 \\
         \hline
-        \texttt{carpet}   & Teppich (stark absorbierend) & 0.425 \\
-        \hline
-        \texttt{foam}     & Schaum (sehr stark absorbierend) & 0.650 \\
+        \texttt{carpet}   & Teppich  & 0.425 \\
         \hline
     \end{tabular}
     \caption{Verf\"ugbare Materialien in \texttt{materials.json}}
@@ -427,24 +426,7 @@ Start ausgelesen, um \texttt{room\_geometry.json} mit der passenden Absorption
 zu generieren. Der Rust-Tracer schreibt es anschlie\ss{}end in \texttt{ir\_output.json},
 von wo die Convolution es f\"ur die frequenzabh\"angige D\"ampfung \"ubernimmt.
 
-\subsection{Abh\"angigkeiten}
 
-\begin{table}[H]
-    \centering
-    \begin{tabular}{|l|l|c|}
-        \hline
-        \textbf{Modul} & \textbf{Bibliotheken} & \textbf{Version} \\
-        \hline
-        \texttt{wav\_handler.py} & soundfile, numpy & Any \\
-        \hline
-        \texttt{obj\_parser.py} & pathlib, json & Built-in \\
-        \hline
-        \texttt{convolution.py} & scipy, numpy & Any \\
-        \hline
-        \texttt{materials.json} & --- (Datenbasis) & --- \\
-        \hline
-    \end{tabular}
-\end{table}
 
 % ========================================
 \subsection{Visualisierung: \texttt{visualizer.py}}
@@ -528,7 +510,7 @@ die Datei wird durch Ausf\"uhren der Pipeline mit einer \texttt{room.obj} erzeug
 \subsection{Akzeptanzkriterien und Validierung}
 % ========================================
 
-\subsection{Ticket 3: Audio I/O}
+\subsubsection{Audio I/O}
 
 \begin{table}[H]
     \centering
@@ -545,7 +527,7 @@ die Datei wird durch Ausf\"uhren der Pipeline mit einer \texttt{room.obj} erzeug
     \end{tabular}
 \end{table}
 
-\subsection{Raumdaten: OBJ-Parser \& Material-Integration}
+\subsubsection{Raumdaten: OBJ-Parser \& Material-Integration}
 
 \begin{table}[H]
     \centering
@@ -598,49 +580,8 @@ Bei Beton ($\alpha = 0.033$) ben\"otigt ein Strahl theoretisch 204 Bounces,
 wird aber durch \texttt{max\_bounces = 100} begrenzt.
 Bei Teppich ($\alpha = 0.425$) bricht er bereits nach 11 Bounces ab.
 
-\subsection{Abschnittsabgrenzung zur DSP-Dokumentation}
 
-Die mathematischen Details der Impulsantwort-Konstruktion (\texttt{build\_impulse\_response}),
-die Wahl des Faltungsalgorithmus (\texttt{oaconvolve}) sowie die vollst\"andige
-Oktavband-Filterbank sind in Kapitel~7 (Signalverarbeitung, Cem Acar) dokumentiert.
-Der vorliegende Abschnitt beschr\"ankt sich auf die Schnittstellenperspektive:
-Was \texttt{convolve()} als Vertrag anbietet und wie es in die Gesamtpipeline
-eingebunden ist.
 
-% ========================================
-\subsection{Zusammenfassung und Ausblick}
-% ========================================
 
-\subsection{Implementierte Features}
 
-\begin{enumerate}
-    \item \textbf{Audio I/O}: Robust WAV-Lesen/Schreiben mit soundfile
-    \item \textbf{Clipping-Pr\"avention}: Peak-Normalisierung vor Export
-    \item \textbf{OBJ-Parser}: Liest Vertices/Faces, konvertiert in Dreiecke
-    \item \textbf{Material-Integration}: \texttt{export\_room\_geometry()} verbindet OBJ mit \texttt{materials.json}
-    \item \textbf{Rust-OBJ-Pipeline}: Rust l\"adt \texttt{room\_geometry.json} automatisch
-    \item \textbf{Material-Durchleitung}: \texttt{wall\_material} von Config bis Convolution
-    \item \textbf{Frequenzabh\"angige D\"ampfung}: Oktavband-EQ via \texttt{apply\_material\_absorption()}
-    \item \textbf{Pipeline-Integration}: Vollautomatisch ab Schritt~0 (OBJ-Erkennung)
-\end{enumerate}
-
-\subsection{M\"ogliche Erweiterungen}
-
-\begin{enumerate}
-    \item \textbf{Multi-Channel Audio}: Stereo/5.1 Surround Support
-    \item \textbf{Per-Dreieck-Materialien}: Verschiedene Materialien pro Wandfl\"ache aus \texttt{.mtl}-Datei
-    \item \textbf{Adaptive Normalisierung}: Loudness-basierte Pegel (LUFS) statt Peak
-    \item \textbf{Geometrie-Optimierungen}: BVH-Tree f\"ur schnelle OBJ-Intersects
-\end{enumerate}
-
-\subsection{Code-Referenz}
-
-\subsection{wav\_handler.py}
-Code-Referenz: \texttt{python\_service/wav\_handler.py}
-
-\subsection{obj\_parser.py}
-Code-Referenz: \texttt{python\_service/obj\_parser.py}
-
-\subsection{main.py}
-Code-Referenz: \texttt{python\_service/main.py}
 
