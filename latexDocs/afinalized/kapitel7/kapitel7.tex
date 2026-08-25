@@ -244,7 +244,7 @@ $44100 \cdot 19842 \approx 8{,}8 \cdot 10^{8}$
 Multiply-Accumulate-Operationen für eine einzige Sekunde Audio, und bei einer
 Impulsantwort von einer Sekunde Länge sind es knapp $2 \cdot 10^{9}$. Die
 schnelle Faltung über die FFT transformiert stattdessen beide Signale,
-multipliziert spektral und transformiert zurück (Oppenheim \& Schafer, 2010),
+multipliziert spektral und transformiert zurück \parencite{oppenheim2010},
 Komplexität $\mathcal{O}\bigl((N + M)\log(N + M)\bigr)$. Für
 $N + M - 1 = 88199$ genügt eine FFT-Länge von $2^{17} = 131072$. Aus Milliarden
 Operationen werden einige Millionen. In dieser Größenordnung liegen auch die
@@ -255,8 +255,8 @@ Messwerte in Abschnitt~\ref{subsubsec:benchmark}.
 
 SciPy bietet für die schnelle Faltung zwei Kandidaten:
 \texttt{signal.fftconvolve}, das beide Signale in voller Länge transformiert,
-und \texttt{signal.oaconvolve}, die Overlap-Add-Umsetzung (Oppenheim \&
-Schafer, 2010; Virtanen et al., 2020). Overlap-Add zerlegt das lange
+und \texttt{signal.oaconvolve}, die Overlap-Add-Umsetzung
+\parencite{oppenheim2010,virtanen2020}. Overlap-Add zerlegt das lange
 Eingangssignal in Blöcke, faltet jeden Block per FFT mit der Impulsantwort und
 addiert die überlappenden Blockergebnisse zum Gesamtsignal. Entscheidend ist,
 dass sich die FFT-Länge dabei nach der Impulsantwort richtet und nicht nach dem
@@ -454,7 +454,7 @@ Regressionen ab.
 
 Reale Oberflächen absorbieren Schall frequenzabhängig. Ein Teppichboden
 absorbiert hohe Frequenzen um ein Vielfaches stärker als tiefe, eine Betonwand
-reflektiert nahezu breitbandig (Kuttruff, 2016). Ein Raum mit Teppich klingt
+reflektiert nahezu breitbandig \parencite{kuttruff2016}. Ein Raum mit Teppich klingt
 deshalb nicht einfach leiser nach, sondern dumpfer. Die Höhen des Nachhalls
 klingen zuerst ab. Die Rust-Engine bildet diesen Effekt nicht ab. Wie in
 Abschnitt~2.1 beschrieben, reduziert sie die Absorption an jeder Wand auf einen
@@ -485,12 +485,12 @@ source of truth) und kein Risiko, dass die Datenbestände der beiden Dienste
 auseinanderlaufen. Jedes Material ist durch sechs Oktavband-Absorptionskoeffizienten
 $\alpha_b$ zu den Mittenfrequenzen $125$, $250$, $500$, $1000$, $2000$ und
 $4000$~Hz sowie einen Streukoeffizienten beschrieben. Die Koeffizienten
-orientieren sich an tabellierten raumakustischen Messwerten (Kuttruff, 2016).
+orientieren sich an tabellierten raumakustischen Messwerten \parencite{kuttruff2016}.
 Tabelle~\ref{tab:materials} zeigt den vollständigen Datenbestand.
 
 \begin{table}[htbp]
     \centering
-    \caption{Materialdatenbank \texttt{materials.json}:
+    \caption[Materialdatenbank \texttt{materials.json}]{Materialdatenbank \texttt{materials.json}:
     Oktavband-Absorptionskoeffizienten $\alpha_b$ und Streukoeffizient $s$.}
     \label{tab:materials}
     \begin{tabular}{l l r r r r r r r}
@@ -540,7 +540,7 @@ geometrischen Raumakustik. Ein Schallanteil, der zum Zeitpunkt $t$ am Empfänger
 eintrifft, hat bis dahin die Strecke $c \cdot t$ zurückgelegt. In einem Raum mit
 mittlerer freier Weglänge $\bar{\ell}$ zwischen zwei Wandkontakten, für konvexe
 Räume gilt näherungsweise $\bar{\ell} = 4V/S$ mit Raumvolumen $V$ und
-Gesamtoberfläche $S$ (Kuttruff, 2016), hat er dabei im Mittel
+Gesamtoberfläche $S$ \parencite{kuttruff2016}, hat er dabei im Mittel
 \[
     n(t) \;=\; \frac{c \cdot t}{\bar{\ell}} \;=\; \frac{t}{\tau_{\mathrm{mfp}}},
     \qquad \tau_{\mathrm{mfp}} = \frac{\bar{\ell}}{c},
@@ -861,13 +861,5 @@ dunkel, obwohl beide aus derselben breitbandigen Trefferliste hervorgehen.
 Die dokumentierten Modellgrenzen, insbesondere die Annahme eines globalen Raummaterials, motivieren einen bandweisen Druck-Export $p_{j,b}$ als sinnvolle architektonische Weiterentwicklung.
 
 
-% =====================================================================
-% Literatur fuers globale Verzeichnis
-% ---------------------------------------------------------------------
-% Oppenheim, A. V. & Schafer, R. W. (2010): Discrete-Time Signal
-%   Processing. 3. Auflage, Pearson, Upper Saddle River, NJ.
-% Kuttruff, H. (2016): Room Acoustics. 6. Auflage, CRC Press,
-%   Boca Raton, FL.
-% Virtanen, P. et al. (2020): SciPy 1.0: Fundamental Algorithms for
-%   Scientific Computing in Python. Nature Methods 17, S. 261-272.
-% =====================================================================
+% Die Literaturangaben dieses Kapitels stehen jetzt in literatur.bib
+% und werden ueber \parencite{...} zitiert.

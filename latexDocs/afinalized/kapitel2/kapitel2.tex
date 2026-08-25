@@ -9,7 +9,7 @@ Das Verständnis dieser Konzepte ist Voraussetzung für die Bewertung der in sp�
 
 \paragraph{Das Inverse Quadratgesetz}
 
-Im freien, reflexionsfreien Schallfeld breitet sich Schall kugelförmig vom Emitter aus.
+Im freien, reflexionsfreien Schallfeld breitet sich Schall kugelförmig vom Emitter aus \parencite{kuttruff2016}.
 Da die abgestrahlte Schallleistung $P$ über eine mit $r^2$ wachsende Kugeloberfläche
 $A = 4\pi r^2$ verteilt wird, nimmt die Schallintensität $I$ mit dem Quadrat der Entfernung ab:
 \[I(r) = \frac{P}{4\pi r^2}\]
@@ -21,7 +21,7 @@ Strahlen, die einen längeren Weg zur Mikrofonkapsel zurücklegen, treffen aufgr
 
 \paragraph{Materialabsorption}
 
-Trifft ein Schallstrahl auf eine Raumgrenze, wird ein Teil der Schallenergie absorbiert.
+Trifft ein Schallstrahl auf eine Raumgrenze, wird ein Teil der Schallenergie absorbiert \parencite{kuttruff2016}.
 Dieser Vorgang wird durch den dimensionslosen Absorptionskoeffizienten $\alpha \in [0{,}1]$ beschrieben. Der Restdruck nach einer einzelnen Reflexion berechnet sich zu:
 \[p_{\text{ref}} = p_{\text{ein}} \cdot \sqrt{1 - \alpha}\]
 Bei einer Sequenz von $n$ Reflexionen mit den jeweiligen Koeffizienten $\alpha_1, \ldots, \alpha_n$ gilt:
@@ -30,7 +30,7 @@ Ein vollständig absorbierendes Material ($\alpha = 1{,}0$) vernichtet den Strah
 
 \paragraph{Frühe Reflexionen und späte Nachhallzeit}
 
-Die akustische Impulsantwort eines Raumes lässt sich zeitlich in zwei charakteristische Phasen unterteilen.
+Die akustische Impulsantwort eines Raumes lässt sich zeitlich in zwei charakteristische Phasen unterteilen \parencite{kuttruff2016}.
 Innerhalb der ersten ca. $80\,\text{ms}$ nach dem Direktschall treffen die \emph{frühen Reflexionen} (Early Reflections) ein: diskrete, noch einzeln wahrnehmbare Echos über klar definierte, kurze Ausbreitungspfade, die das Raumgefühl und die Tiefenwahrnehmung maßgeblich prägen.
 Mit zunehmender Zeit überlagern sich Reflexionen höherer Ordnung zu einem dichten, statistisch gleichverteilten Nachhallfeld. Diese \emph{späte Nachhallzeit} (Late Reverberation) klingt exponentiell ab und wird durch die Nachhallzeit $RT_{60}$ charakterisiert -- der Zeitraum, in dem der Schalldruckpegel um $60\,\text{dB}$ abfällt.
 Das stochastische Raytracing erfasst beide Phasen natürlich, da sowohl kurze Direktpfade als auch komplexe Mehrfachreflexionen in der Impulsantwort akkumuliert werden.
@@ -45,7 +45,7 @@ Der Schalldruck am Empfänger ist das Integral über alle möglichen Schallpfade
 
 \paragraph{Der Monte-Carlo-Ansatz}
 
-Die Monte-Carlo-Integration umgeht dieses Problem durch stochastische Stichprobennahme.
+Die Monte-Carlo-Integration umgeht dieses Problem durch stochastische Stichprobennahme \parencite{pharr2023}.
 Statt alle Pfade zu berechnen, schätzt man den Erwartungswert eines Integrals durch den arithmetischen Mittelwert von $N$ zufällig gezogenen Stichproben:
 \[\mathbb{E}[f(X)] \approx \frac{1}{N} \sum_{i=1}^{N} f(x_i)\]
 Nach dem Gesetz der großen Zahlen konvergiert dieser Schätzer für $N \to \infty$ gegen den wahren Integralwert.
@@ -85,7 +85,7 @@ Das \emph{Faltungstheorem} der Fouriertransformation besagt, dass eine Faltung i
 \[Y(f) = \mathcal{F}\{x\}(f) \cdot \mathcal{F}\{h\}(f) \implies y[n] = \mathcal{F}^{-1}\{Y(f)\}\]
 Durch den Einsatz der Fast Fourier Transform (FFT) sinkt die Komplexität auf $\mathcal{O}((N+M)\log(N+M))$, was bei großen $M$ einen massiven Speedup bedeutet.
 
-Da das Audiosignal wesentlich länger sein kann als eine einzelne FFT erlaubt, wird das \emph{Overlap-Add}-Verfahren eingesetzt: Das Signal $x[n]$ wird in überlappungsfreie Blöcke der Länge $L$ aufgeteilt, jeder Block wird separat mit $h[n]$ gefaltet, und die resultierenden Ausgabeblöcke -- je $L + M - 1$ Samples lang -- werden additiv überlagert. Die Implementierung nutzt hierfür \texttt{scipy.signal.oaconvolve}, welche diesen Algorithmus effizient realisiert.
+Da das Audiosignal wesentlich länger sein kann als eine einzelne FFT erlaubt, wird das \emph{Overlap-Add}-Verfahren eingesetzt: Das Signal $x[n]$ wird in überlappungsfreie Blöcke der Länge $L$ aufgeteilt, jeder Block wird separat mit $h[n]$ gefaltet, und die resultierenden Ausgabeblöcke -- je $L + M - 1$ Samples lang -- werden additiv überlagert. Die Implementierung nutzt hierfür \texttt{scipy.signal.oaconvolve}, welche diesen Algorithmus effizient realisiert \parencite{oppenheim2010,virtanen2020}.
 
 
 \subsection{Theoretische Grundlagen paralleler Systeme}

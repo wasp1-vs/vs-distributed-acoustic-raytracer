@@ -1,0 +1,121 @@
+% =====================================================================
+% Globales Literaturverzeichnis der Projektdokumentation
+% "Akustischer Ray Tracer" -- WPF Verteilte Systeme, TH Koeln
+% ---------------------------------------------------------------------
+% Die ersten drei Eintraege stammen von Cem Acar aus der Datei
+% latexDocs/literatur_kapitel5.bib, die auf dem Branch origin/main liegt
+% (auf LatexWriting existiert sie nicht) und wurden hierher uebernommen,
+% wie im Kopfkommentar jener Datei ausdruecklich vorgesehen.
+% =====================================================================
+
+@book{oppenheim2010,
+  author    = {Oppenheim, Alan V. and Schafer, Ronald W.},
+  title     = {Discrete-Time Signal Processing},
+  edition   = {3},
+  publisher = {Pearson},
+  address   = {Upper Saddle River, NJ},
+  year      = {2010}
+}
+
+@book{kuttruff2016,
+  author    = {Kuttruff, Heinrich},
+  title     = {Room Acoustics},
+  edition   = {6},
+  publisher = {CRC Press},
+  address   = {Boca Raton, FL},
+  year      = {2016}
+}
+
+@article{virtanen2020,
+  author  = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and others},
+  title   = {{SciPy} 1.0: Fundamental Algorithms for Scientific Computing in {Python}},
+  journal = {Nature Methods},
+  volume  = {17},
+  number  = {3},
+  pages   = {261--272},
+  year    = {2020},
+  doi     = {10.1038/s41592-019-0686-2}
+}
+
+% ---------------------------------------------------------------------
+% Ergaenzt fuer die bislang unbelegten Stellen in Kapitel 2, 4, 5 und 6.
+% pharr2023 ist in Kapitel 2 zitiert; die uebrigen sind noch nicht zitiert,
+% weil die betreffenden Kapitel anderen Autoren gehoeren
+% (Zuordnung am Dateiende).
+% ---------------------------------------------------------------------
+
+@article{moeller1997,
+  author  = {M{\"o}ller, Tomas and Trumbore, Ben},
+  title   = {Fast, Minimum Storage Ray-Triangle Intersection},
+  journal = {Journal of Graphics Tools},
+  volume  = {2},
+  number  = {1},
+  pages   = {21--28},
+  year    = {1997},
+  doi     = {10.1080/10867651.1997.10487468}
+}
+
+@inproceedings{amdahl1967,
+  author    = {Amdahl, Gene M.},
+  title     = {Validity of the Single Processor Approach to Achieving
+               Large Scale Computing Capabilities},
+  booktitle = {Proceedings of the AFIPS Spring Joint Computer Conference},
+  pages     = {483--485},
+  year      = {1967},
+  doi       = {10.1145/1465482.1465560}
+}
+
+@inproceedings{algazi2001,
+  author    = {Algazi, V. Ralph and Duda, Richard O. and
+               Thompson, Dennis M. and Avendano, Carlos},
+  title     = {The {CIPIC} {HRTF} Database},
+  booktitle = {Proceedings of the IEEE Workshop on Applications of Signal
+               Processing to Audio and Acoustics (WASPAA)},
+  pages     = {99--102},
+  year      = {2001},
+  doi       = {10.1109/ASPAA.2001.969552}
+}
+
+@techreport{aes69,
+  author      = {{Audio Engineering Society}},
+  title       = {{AES69-2022}: {AES} Standard for File Exchange --
+                 Spatial Acoustic Data File Format ({SOFA})},
+  institution = {Audio Engineering Society},
+  address     = {New York, NY},
+  year        = {2022}
+}
+
+@book{vorlaender2008,
+  author    = {Vorl{\"a}nder, Michael},
+  title     = {Auralization: Fundamentals of Acoustics, Modelling,
+               Simulation, Algorithms and Acoustic Virtual Reality},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {2008}
+}
+
+@book{pharr2023,
+  author    = {Pharr, Matt and Jakob, Wenzel and Humphreys, Greg},
+  title     = {Physically Based Rendering: From Theory to Implementation},
+  edition   = {4},
+  publisher = {MIT Press},
+  address   = {Cambridge, MA},
+  year      = {2023}
+}
+
+% =====================================================================
+% Vorgesehene Zuordnung fuer die noch offenen \cite-Einfuegungen
+% (Kapitel gehoeren anderen Autoren -- vor dem Einfuegen abstimmen):
+%
+%   [ERLEDIGT] kapitel2  inverses Quadratgesetz ..... kuttruff2016
+%   [ERLEDIGT] kapitel2  Absorptionsmodell .......... kuttruff2016
+%   [ERLEDIGT] kapitel2  frueh/spaet, RT60 .......... kuttruff2016
+%   [ERLEDIGT] kapitel2  Monte-Carlo-Schaetzer ...... pharr2023
+%   [ERLEDIGT] kapitel2  Overlap-Add ................ oppenheim2010, virtanen2020
+%   kapitel2:105 Amdahls Gesetz ..................... amdahl1967
+%   kapitel4:184 Moeller-Trumbore ................... moeller1997
+%   kapitel5:27  Sabine'sche Nachhallformel ......... kuttruff2016
+%   kapitel6:28  HRTF-Grundlagen .................... vorlaender2008
+%   kapitel6:30  CIPIC-Datenbank .................... algazi2001
+%   kapitel6:30  SOFA-Format ........................ aes69
+% =====================================================================

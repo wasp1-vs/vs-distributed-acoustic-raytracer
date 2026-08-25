@@ -1,8 +1,10 @@
-\documentclass{article}
+\documentclass[a4paper]{article}
 
 
 % --- PAKETE ---
 \usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{csquotes}
 \usepackage{lmodern}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -18,6 +20,14 @@
 \usepackage{algorithm}
 \usepackage{algorithmic}
 \usepackage{hyperref}
+\usepackage[backend=biber,style=authoryear]{biblatex}
+\addbibresource{literatur.bib}
+\hypersetup{
+    pdftitle={Akustischer Ray Tracer -- Projektdokumentation},
+    pdfauthor={Acar, Asemota, Dick, El-Ali, Hasan, Hor, Pittelkow, Sop},
+    pdfsubject={WPF Verteilte Systeme, TH Köln},
+    hidelinks
+}
 \usetikzlibrary{arrows.meta,positioning}
 \pgfplotsset{compat=1.18}
 \setlength{\emergencystretch}{3em}
@@ -44,6 +54,11 @@
 
 \begin{document}
 
+% ngerman macht " zu einem aktiven Shorthand. Das Dokument wurde ohne babel
+% geschrieben und enthaelt rohe " im Fliesstext (z.B. \texttt{mode="full"}),
+% die dadurch zerstoert wuerden. Deutsche Trennung und Bezeichner bleiben aktiv.
+\shorthandoff{"}
+
 
 
 
@@ -52,7 +67,11 @@
 
     \tableofcontents
     \newpage
-    
+
+    \listoffigures
+    \listoftables
+    \newpage
+
     \include{kapitel1/kapitel1}
 % ==========================================
 % KAPITEL 2: THEORETISCHE GRUNDLAGEN
@@ -90,6 +109,10 @@
 % ==========================================
 
     \include{kapitel8/kapitel8}
+% ==========================================
+% LITERATURVERZEICHNIS
+% ==========================================
+    \printbibliography[heading=bibintoc]
 % ==========================================
 % OUTRO: QUELLCODE
 % ==========================================
