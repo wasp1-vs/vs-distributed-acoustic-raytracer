@@ -102,7 +102,7 @@ Der Speedup $S(n)$ bei Verwendung von $n$ parallelen Verarbeitungseinheiten (hie
 Ein Speedup von $S(n) = n$ wird als \emph{linear} bezeichnet und stellt den theoretischen Idealfall dar, bei dem eine Verdopplung der Ressourcen die Laufzeit exakt halbiert.
 
 \paragraph{Amdahls Gesetz}
-In der Praxis lässt sich jedoch nicht jeder Programmteil parallelisieren. Amdahls Gesetz beschreibt den maximal erreichbaren Speedup in Abhängigkeit vom parallelisierbaren Anteil $p$ eines Programms (bei einem seriellen, nicht parallelisierbaren Restanteil von $1-p$):
+In der Praxis lässt sich jedoch nicht jeder Programmteil parallelisieren. Amdahls Gesetz \parencite{amdahl1967} beschreibt den maximal erreichbaren Speedup in Abhängigkeit vom parallelisierbaren Anteil $p$ eines Programms (bei einem seriellen, nicht parallelisierbaren Restanteil von $1-p$):
 \begin{equation}
     S(n) = \frac{1}{(1-p) + \dfrac{p}{n}}
     \label{eq:amdahl}

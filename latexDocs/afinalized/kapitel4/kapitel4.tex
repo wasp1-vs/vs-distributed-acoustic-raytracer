@@ -181,7 +181,7 @@ Wandfläche aufspannen.
 \label{subsubsec:moller_trumbore}
 
 Zur Berechnung von Strahl-Dreieck-Schnittpunkten wurde der
-Möller-Trumbore-Algorithmus implementiert. Dieser Algorithmus wird häufig im
+Möller-Trumbore-Algorithmus \parencite{moeller1997} implementiert. Dieser Algorithmus wird häufig im
 Raytracing verwendet, da er direkt prüft, ob ein Strahl ein Dreieck trifft, ohne
 zuvor explizit die Ebenengleichung des Dreiecks bestimmen zu müssen.
 
@@ -676,7 +676,7 @@ Aufgrund von Rundungsfehlern berechnet der Algorithmus die Distanz zur aktuellen
 
 Die ursprüngliche Abbruchbedingung lautete: \texttt{if ray\_t < 0.0 \{ return None; \}}.
 Da sehr kleine negative Fließkomma-Werte aufgrund von Präzisionsverlusten oft ignoriert oder fehlerhaft evaluiert wurden, registrierte die Engine fälschlicherweise sofortige, valide Treffer auf derselben Wand.
-Der Strahl \"reflektierte\" in einer Endlosschleife am selben Punkt, bis das \texttt{max\_bounces}-Limit erschöpft war.
+Der Strahl \enquote{reflektierte} in einer Endlosschleife am selben Punkt, bis das \texttt{max\_bounces}-Limit erschöpft war.
 In der Computergrafik ist dieses Phänomen als \emph{Shadow Acne} bekannt.
 Zur Lösung dieses Problems wurde ein Epsilon-Wert ($\epsilon$) eingeführt.
 Die Bedingung wurde zu \texttt{if ray\_t < 0.001 \{ return None; \}} modifiziert.

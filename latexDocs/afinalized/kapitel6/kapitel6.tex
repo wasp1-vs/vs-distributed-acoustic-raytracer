@@ -25,9 +25,9 @@ Da die Simulation parallel arbeitet, wird diese zusätzliche Information zusamme
 \subsection{HRTF als Grundlage räumlicher Wahrnehmung}
 \label{subsec:hrtf_foundation}
 
-Für die binaurale Wiedergabe wird eine HRTF-Datenbank verwendet. HRTF steht für \textit{Head-Related Transfer Function} und beschreibt, wie ein eintreffender Schall durch Kopf, Ohrmuscheln und Oberkörper abhängig von seiner Richtung verändert wird. Diese Filtereffekte sind entscheidend dafür, dass Menschen Schallquellen räumlich lokalisieren können.
+Für die binaurale Wiedergabe wird eine HRTF-Datenbank verwendet. HRTF steht für \textit{Head-Related Transfer Function} und beschreibt, wie ein eintreffender Schall durch Kopf, Ohrmuscheln und Oberkörper abhängig von seiner Richtung verändert wird. Diese Filtereffekte sind entscheidend dafür, dass Menschen Schallquellen räumlich lokalisieren können \parencite{vorlaender2008}.
 
-In der Implementierung wird eine SOFA-Datei aus der CIPIC-Datenbank verwendet, beispielsweise \texttt{subject\_003.sofa}. SOFA ist ein standardisiertes Format für räumliche Audiodaten. Die Klasse \texttt{HRTFDatabase} lädt daraus die Messpositionen und die dazugehörigen HRIRs. HRIR steht für \textit{Head-Related Impulse Response} und bezeichnet die Impulsantworten für linkes und rechtes Ohr zu einer bestimmten Einfallsrichtung.
+In der Implementierung wird eine SOFA-Datei aus der CIPIC-Datenbank \parencite{algazi2001} verwendet, beispielsweise \texttt{subject\_003.sofa}. SOFA ist ein standardisiertes Format für räumliche Audiodaten \parencite{aes69}. Die Klasse \texttt{HRTFDatabase} lädt daraus die Messpositionen und die dazugehörigen HRIRs. HRIR steht für \textit{Head-Related Impulse Response} und bezeichnet die Impulsantworten für linkes und rechtes Ohr zu einer bestimmten Einfallsrichtung.
 
 Für jede simulierte Reflexion wird aus dem Richtungsvektor zunächst ein Winkelpaar aus Azimut und Elevation berechnet. Der Azimut beschreibt die horizontale Richtung, also vorne, links, rechts oder hinten. Die Elevation beschreibt die vertikale Richtung, also oben oder unten. Anhand dieser Winkel wird anschließend der nächstgelegene Messpunkt in der HRTF-Datenbank ausgewählt.
 
