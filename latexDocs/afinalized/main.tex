@@ -22,11 +22,12 @@
 \usepackage{hyperref}
 \usepackage[backend=biber,style=authoryear]{biblatex}
 \addbibresource{literatur.bib}
+% Autor-Jahr mit Komma, wie in Kapitel 7 vorher geschrieben: (Kuttruff, 2016)
+\renewcommand*{\nameyeardelim}{\addcomma\space}
 \hypersetup{
     pdftitle={Akustischer Ray Tracer -- Projektdokumentation},
     pdfauthor={Acar, Asemota, Dick, El-Ali, Hasan, Hor, Pittelkow, Sop},
-    pdfsubject={WPF Verteilte Systeme, TH Köln},
-    hidelinks
+    pdfsubject={WPF Verteilte Systeme, TH Köln}
 }
 \usetikzlibrary{arrows.meta,positioning}
 \pgfplotsset{compat=1.18}
@@ -66,10 +67,6 @@
     \include{intro/intro}
 
     \tableofcontents
-    \newpage
-
-    \listoffigures
-    \listoftables
     \newpage
 
     \include{kapitel1/kapitel1}
